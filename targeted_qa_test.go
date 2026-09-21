@@ -29,7 +29,7 @@ func publicSystemOne(t *testing.T, body string) (*SystemOneResponse, error) {
 		_, _ = io.WriteString(w, body)
 	}))
 	defer server.Close()
-	client, err := NewClient("qa-secret", WithBaseURL(server.URL), noRetry())
+	client, err := NewClient(WithAPIKey("qa-secret"), WithBaseURL(server.URL), noRetry())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestPublicSystemOneAcceptsNestedArbitraryJSONNumbers(t *testing.T) {
 		_, _ = io.WriteString(w, `{"model":"m","answers":{"n":{"type":"noul","noul":0},"c":{"type":"choice","choice":"a","probabilities":{"a":1},"confidence":0},"s":{"type":"score","score":0,"probabilities":{"0":1},"legend":{"0":{"exponent":1e400,"integer":123456789012345678901234567890}},"confidence":0}},"usage":{"input_tokens":0,"output_tokens":0}}`)
 	}))
 	defer server.Close()
-	client, err := NewClient("key", WithBaseURL(server.URL), noRetry())
+	client, err := NewClient(WithAPIKey("key"), WithBaseURL(server.URL), noRetry())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -56,23 +56,25 @@ const DefaultBaseURL = "https://api.typesafe.ai"
 
 type Client struct { /* immutable private configuration */ }
 
-func NewClient(apiKey string, opts ...Option) (*Client, error)
+func NewClient(opts ...Option) (*Client, error)
 func (c *Client) SystemOne(ctx context.Context, req SystemOneRequest) (*SystemOneResponse, error)
 func (c *Client) ListModels(ctx context.Context) (*ModelsResponse, error)
 ```
 
-`NewClient` performs no network call. The API key is explicit: the library does not read environment variables. Applications may read their own environment and pass the value. Reject blank/newline-containing keys. The client is safe for concurrent calls when an injected `http.RoundTripper` is itself safe. It must not mutate caller options, requests, maps/slices, or an injected `*http.Client`.
+`NewClient` performs no network call or environment lookup and requires exactly one authentication strategy. `WithAPIKey` rejects blank/newline-containing keys and lets the SDK set bearer authentication. `WithAuthenticatedHTTPClient` copies a caller-owned authenticated client and leaves `Authorization` entirely to its transport. `WithHTTPClient` is only transport customization and cannot authenticate by itself. Duplicate selectors and API-key/authenticated-client or ordinary/authenticated-client conflicts fail regardless of option order; API key plus one ordinary `WithHTTPClient` is valid. Configuration errors name the conflicting option(s) and direct callers to `WithAPIKey` or `WithAuthenticatedHTTPClient` as appropriate. The client is safe for concurrent calls when an injected `http.RoundTripper` is itself safe. It must not mutate caller options, requests, maps/slices, or an injected `*http.Client`.
 
 Use ordinary functional `Option` values for this small constructor only:
 
-- `WithBaseURL(string)`: default HTTPS endpoint; permit plaintext HTTP only for an explicit `localhost` or loopback-IP URL for tests. Reject userinfo, query, fragment, and missing host/scheme. No environment override.
-- `WithHTTPClient(*http.Client)`: copy the client value and force `CheckRedirect` to return `http.ErrUseLastResponse`; retain the caller's transport/timeouts without mutation. Redirect responses are errors and are never followed, so neither token nor POST body can cross origins.
+- `WithAPIKey(string)`: explicit SDK-managed bearer authentication; no implicit environment source.
+- `WithAuthenticatedHTTPClient(*http.Client)`: copy a client whose caller-owned transport manages authentication; this is a declaration, not SDK verification of authentication. It is mutually exclusive with API-key authentication and `WithHTTPClient`.
+- `WithBaseURL(string)`: default HTTPS endpoint; permit path prefixes and append `/v1/*` without discarding or re-escaping them. Permit plaintext HTTP only for an explicit `localhost` or loopback-IP URL for tests. Reject userinfo, query (including bare `?`), fragment (including bare `#`), dot segments including percent-encoded forms, and missing host/scheme. No environment override.
+- `WithHTTPClient(*http.Client)`: copy the client value for API-key mode; retain its transport, jar, timeouts, and other fields while forcing `CheckRedirect` on the copy to return `http.ErrUseLastResponse`. Redirect responses are errors and are never followed, so neither token nor POST body can cross origins.
 - `WithDefaultModel(string)`: default `jev-latest`; this is a convenience default, not an allowlist.
 - `WithAttemptTimeout(time.Duration)`: default 10 seconds, applying through request context to send and body read.
 - `WithRetryPolicy(RetryPolicy)`: immutable copy; `MaxRetries: 0` disables retries.
 - `WithResponseLimit(int64)`: one bounded limit for both success and error bodies after Go transport decompression; default 4 MiB.
 
-Do not offer arbitrary request headers in the first release: they expand the credential/security surface without a current API requirement. Set `Authorization`, `Accept`, `Content-Type` for POST, a versioned `User-Agent`, and retry count internally.
+In API-key mode set `Authorization`, `Accept`, `Content-Type` for POST, a versioned `User-Agent`, and retry count internally. In authenticated-transport mode never read, set, delete, decode, or log `Authorization`; the wrapper runs on every retry and remains caller-owned. The SDK does not import OAuth code or invent a token-provider interface.
 
 ### Requests and questions
 
@@ -279,7 +281,17 @@ The panel should review against this plan rather than comparing line-for-line wi
 4. Go API reviewer checks package surface with `go doc`, constructor ergonomics, ownership, error inspection, and absence of speculative abstractions/dependencies.
 5. Governance reviewer checks the parent requirements and pinned workflow provenance.
 
-## 8. Unresolved questions (non-blocking unless noted)
+## 8. Transport-authentication implementation decision
+
+Authentication is an explicit constructor option rather than a constructor argument. Exactly one of `WithAPIKey` and `WithAuthenticatedHTTPClient` is required. The latter declares that authentication belongs to the supplied transport; the SDK does not inspect tokens or verify that the transport authenticates. OAuth grant flow, acquisition, refresh, lifecycle context, and token-endpoint TLS/timeouts remain application concerns. An inference request context may not bound token acquisition performed with a context captured by an OAuth client.
+
+Gateway base URLs preserve their decoded and escaped path prefix and append exactly `/v1/systemone` or `/v1/models`. Literal trailing slashes are normalized; queries, userinfo, fragments, malformed URLs, and decoded `.`/`..` segments are rejected. Redirects remain disabled on a copied HTTP client in both authentication modes.
+
+Transport-owned credentials are unknown to the SDK and therefore cannot be redacted from caller transport logs or an unwrapped custom transport cause. SDK error text and client String/GoString/JSON/slog representations remain static and redacted.
+
+AC-AUTH01 through AC-AUTH06 are evidenced by named `TestACAUTH*` tests and `Example_withAuthenticatedHTTPClient`: option selection and order-independent conflicts; per-attempt transport authentication and no hidden 401/403 retry; copied-client and redirect behavior; exact gateway RequestURI escaping and URL rejection; request-ID/redaction behavior; and compilation of all packages, examples, README snippets, and the live-tagged test without live calls.
+
+## 9. Unresolved questions (non-blocking unless noted)
 
 - **Maintainers/CODEOWNERS:** actual GitHub users/teams are not known. Confirm before adding `MAINTAINERS.md` or `.github/CODEOWNERS`; do not guess.
 - **Release automation:** repository release/signing policy is not provided. Initial scope should document manual pre-v1 tagging; add publishing automation only after Stacklok chooses provenance/signing requirements.

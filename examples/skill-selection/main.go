@@ -19,7 +19,7 @@ func recommend(confidence float64) (string, error) {
 	defer s.Close()
 	p := typesafe.DefaultRetryPolicy()
 	p.MaxRetries = 0
-	client, err := typesafe.NewClient("synthetic", typesafe.WithBaseURL(s.URL), typesafe.WithRetryPolicy(p))
+	client, err := typesafe.NewClient(typesafe.WithAPIKey("synthetic"), typesafe.WithBaseURL(s.URL), typesafe.WithRetryPolicy(p))
 	if err != nil {
 		return "review", err
 	}

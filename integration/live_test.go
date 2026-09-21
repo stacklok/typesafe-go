@@ -29,7 +29,7 @@ func TestACLIVE01Conformance(t *testing.T) {
 	}
 	policy := typesafe.DefaultRetryPolicy()
 	policy.MaxRetries = 0
-	client, err := typesafe.NewClient(key, typesafe.WithDefaultModel(model), typesafe.WithRetryPolicy(policy))
+	client, err := typesafe.NewClient(typesafe.WithAPIKey(key), typesafe.WithDefaultModel(model), typesafe.WithRetryPolicy(policy))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -81,7 +81,7 @@ func TestPublicClientContractFixturesAndHeaders(t *testing.T) {
 		handlerErrors <- nil
 	}))
 	defer server.Close()
-	client, err := NewClient("fixture-key", WithBaseURL(server.URL), noRetry())
+	client, err := NewClient(WithAPIKey("fixture-key"), WithBaseURL(server.URL), noRetry())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestACAPI02EndToEndAllVariants(t *testing.T) {
 		io.WriteString(w, `{"model":"pinned-1.0.0","answers":{"n":{"type":"noul","noul":0},"c":{"type":"choice","choice":"a","probabilities":{"a":0.6,"b":0.4},"confidence":0},"s":{"type":"score","score":0.5,"probabilities":{"0":0.5,"1":0.5},"legend":{"0":{"nested":true},"1":[1,null]},"confidence":0.2}},"usage":{"input_tokens":0,"output_tokens":0}}`)
 	}))
 	defer srv.Close()
-	client, err := NewClient("secret", WithBaseURL(srv.URL), noRetry())
+	client, err := NewClient(WithAPIKey("secret"), WithBaseURL(srv.URL), noRetry())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestACAPI03And04SchemaLeniencyAndValidation(t *testing.T) {
 		{State: 3, Questions: map[string]Question{"q": Score(nil, "x")}},
 		{State: "x", Questions: map[string]Question{"q": Score(nil, nil)}},
 	} {
-		c, _ := NewClient("x", WithBaseURL("http://localhost:1"), noRetry())
+		c, _ := NewClient(WithAPIKey("x"), WithBaseURL("http://localhost:1"), noRetry())
 		if _, err := c.SystemOne(context.Background(), req); err == nil {
 			t.Error("invalid shape accepted")
 		}
@@ -182,15 +182,15 @@ func TestACAPI03And04SchemaLeniencyAndValidation(t *testing.T) {
 }
 
 func TestACAPI05InputFailuresDoNotCallTransport(t *testing.T) {
-	if _, err := NewClient(" \n"); err == nil {
+	if _, err := NewClient(WithAPIKey(" \n")); err == nil {
 		t.Fatal("blank key accepted")
 	}
-	if _, err := NewClient("x", WithDefaultModel(" ")); err == nil {
+	if _, err := NewClient(WithAPIKey("x"), WithDefaultModel(" ")); err == nil {
 		t.Fatal("blank model accepted")
 	}
 	var calls atomic.Int32
 	rt := roundTripFunc(func(*http.Request) (*http.Response, error) { calls.Add(1); return nil, errors.New("called") })
-	c, _ := NewClient("x", WithHTTPClient(&http.Client{Transport: rt}), noRetry())
+	c, _ := NewClient(WithAPIKey("x"), WithHTTPClient(&http.Client{Transport: rt}), noRetry())
 	var typedNil *NoulQuestion
 	bad := []SystemOneRequest{
 		{State: "x"}, {State: "x", Questions: map[string]Question{"": Noul(nil, nil)}},
@@ -302,7 +302,7 @@ func TestProbabilityNullRejectedEndToEnd(t *testing.T) {
 				_, _ = io.WriteString(w, `{"model":"m","answers":{"q":`+answer+`},"usage":{"input_tokens":0,"output_tokens":0}}`)
 			}))
 			defer srv.Close()
-			client, err := NewClient("key", WithBaseURL(srv.URL), noRetry())
+			client, err := NewClient(WithAPIKey("key"), WithBaseURL(srv.URL), noRetry())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -332,7 +332,7 @@ func TestRequestIDEchoingAPIKeyIsRemoved(t *testing.T) {
 			w.WriteHeader(response.status)
 			_, _ = io.WriteString(w, response.body)
 		}))
-		client, err := NewClient("secret-key", WithBaseURL(srv.URL), noRetry())
+		client, err := NewClient(WithAPIKey("secret-key"), WithBaseURL(srv.URL), noRetry())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -361,7 +361,7 @@ func TestACAPI09Models(t *testing.T) {
 		io.WriteString(w, `{"models":[{"name":"jev-latest","description":"alias","release_date":"2026-09-21"}]}`)
 	}))
 	defer srv.Close()
-	c, _ := NewClient("x", WithBaseURL(srv.URL), noRetry())
+	c, _ := NewClient(WithAPIKey("x"), WithBaseURL(srv.URL), noRetry())
 	resp, err := c.ListModels(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -379,7 +379,7 @@ func TestACAPI09Models(t *testing.T) {
 
 func TestACSEC01And05SecretSafeFormatting(t *testing.T) {
 	secret := "super-secret-token"
-	c, _ := NewClient(secret)
+	c, _ := NewClient(WithAPIKey(secret))
 	var log strings.Builder
 	logger := slog.New(slog.NewTextHandler(&log, nil))
 	logger.Info("client", "value", c)
@@ -404,7 +404,7 @@ func TestACSEC01And05SecretSafeFormatting(t *testing.T) {
 		io.WriteString(w, `{"detail":[{"msg":"state and msg","input":{"private":"payload"}}]}`)
 	}))
 	defer srv.Close()
-	client, _ := NewClient(secret, WithBaseURL(srv.URL), noRetry())
+	client, _ := NewClient(WithAPIKey(secret), WithBaseURL(srv.URL), noRetry())
 	_, err := client.SystemOne(context.Background(), SystemOneRequest{State: map[string]any{"private": "payload"}, Questions: map[string]Question{"q": Noul(nil, nil)}})
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) || apiErr.StatusCode != 422 || apiErr.RequestID != "request-422" {
@@ -417,7 +417,7 @@ func TestACSEC01And05SecretSafeFormatting(t *testing.T) {
 
 func TestACSEC03URLAndRedirectGuards(t *testing.T) {
 	for _, raw := range []string{"http://example.com", "https://u:p@example.com", "https://example.com?q=x", "https://example.com/#x", "//example.com"} {
-		if _, err := NewClient("x", WithBaseURL(raw)); err == nil {
+		if _, err := NewClient(WithAPIKey("x"), WithBaseURL(raw)); err == nil {
 			t.Errorf("accepted %q", raw)
 		}
 	}
@@ -429,7 +429,7 @@ func TestACSEC03URLAndRedirectGuards(t *testing.T) {
 	}))
 	defer redirect.Close()
 	caller := &http.Client{}
-	c, _ := NewClient("x", WithBaseURL(redirect.URL), WithHTTPClient(caller), noRetry())
+	c, _ := NewClient(WithAPIKey("x"), WithBaseURL(redirect.URL), WithHTTPClient(caller), noRetry())
 	_, err := c.ListModels(context.Background())
 	var api *APIError
 	if !errors.As(err, &api) || api.StatusCode != 307 || reached.Load() {
@@ -454,13 +454,13 @@ func TestRedirectMatrixNeverFollowsOrRetries(t *testing.T) {
 						http.Redirect(w, r, target.URL, status)
 					}))
 					defer origin.Close()
-					options := []Option{WithBaseURL(origin.URL), fastRetry(2)}
+					options := []Option{WithAPIKey("key"), WithBaseURL(origin.URL), fastRetry(2)}
 					var supplied *http.Client
 					if custom {
 						supplied = &http.Client{}
 						options = append(options, WithHTTPClient(supplied))
 					}
-					client, err := NewClient("key", options...)
+					client, err := NewClient(options...)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -483,7 +483,7 @@ func TestRedirectMatrixNeverFollowsOrRetries(t *testing.T) {
 }
 
 func TestResponseLimitRejectsOverflow(t *testing.T) {
-	if _, err := NewClient("x", WithResponseLimit(1<<63-1)); err == nil {
+	if _, err := NewClient(WithAPIKey("x"), WithResponseLimit(1<<63-1)); err == nil {
 		t.Fatal("MaxInt64 response limit accepted")
 	}
 }
@@ -494,7 +494,7 @@ func TestACSEC04BoundedBodies(t *testing.T) {
 			w.WriteHeader(status)
 			io.WriteString(w, strings.Repeat("x", 32))
 		}))
-		c, _ := NewClient("x", WithBaseURL(srv.URL), WithResponseLimit(8), noRetry())
+		c, _ := NewClient(WithAPIKey("x"), WithBaseURL(srv.URL), WithResponseLimit(8), noRetry())
 		_, err := c.ListModels(context.Background())
 		srv.Close()
 		if !errors.Is(err, ErrResponseTooLarge) {
@@ -509,7 +509,7 @@ func TestACSEC04BoundedBodies(t *testing.T) {
 	rt := roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Encoding": {"gzip"}}, Body: io.NopCloser(bytes.NewReader(compressed.Bytes()))}, nil
 	})
-	c, _ := NewClient("x", WithHTTPClient(&http.Client{Transport: rt}), WithResponseLimit(8), noRetry())
+	c, _ := NewClient(WithAPIKey("x"), WithHTTPClient(&http.Client{Transport: rt}), WithResponseLimit(8), noRetry())
 	if _, err := c.ListModels(context.Background()); !errors.Is(err, ErrResponseTooLarge) {
 		t.Fatalf("decompressed body was not bounded: %v", err)
 	}
@@ -530,7 +530,7 @@ func TestDefaultTransportBoundsDecompressedGzipAtExactLimit(t *testing.T) {
 		limit  int64
 		tooBig bool
 	}{{int64(len(payload)), false}, {int64(len(payload) - 1), true}} {
-		client, err := NewClient("x", WithBaseURL(server.URL), WithResponseLimit(test.limit), noRetry())
+		client, err := NewClient(WithAPIKey("x"), WithBaseURL(server.URL), WithResponseLimit(test.limit), noRetry())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -550,7 +550,7 @@ func TestACSEC06ConcurrentClientAndOwnership(t *testing.T) {
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, `{"models":[]}`) }))
 	defer srv.Close()
-	c, _ := NewClient("x", WithBaseURL(srv.URL), noRetry())
+	c, _ := NewClient(WithAPIKey("x"), WithBaseURL(srv.URL), noRetry())
 	var wg sync.WaitGroup
 	for range 20 {
 		wg.Add(1)

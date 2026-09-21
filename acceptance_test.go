@@ -28,7 +28,7 @@ func TestAcceptanceConstructionHasNoSideEffects(t *testing.T) {
 		calls.Add(1)
 		return nil, context.Canceled
 	})
-	client, err := NewClient("synthetic", WithHTTPClient(&http.Client{Transport: transport}))
+	client, err := NewClient(WithAPIKey("synthetic"), WithHTTPClient(&http.Client{Transport: transport}))
 	if err != nil || client == nil || calls.Load() != 0 {
 		t.Fatalf("construction side effect: client=%v calls=%d err=%v", client, calls.Load(), err)
 	}

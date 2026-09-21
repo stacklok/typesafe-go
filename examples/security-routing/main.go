@@ -32,11 +32,11 @@ func route(response string) (string, error) {
 
 	policy := typesafe.DefaultRetryPolicy()
 	policy.MaxRetries = 0
-	options := []typesafe.Option{typesafe.WithBaseURL(server.URL), typesafe.WithRetryPolicy(policy)}
+	options := []typesafe.Option{typesafe.WithAPIKey("synthetic"), typesafe.WithBaseURL(server.URL), typesafe.WithRetryPolicy(policy)}
 	if response == "transport-error" {
 		options = append(options, typesafe.WithHTTPClient(&http.Client{Transport: failingTransport{}}))
 	}
-	client, err := typesafe.NewClient("synthetic", options...)
+	client, err := typesafe.NewClient(options...)
 	if err != nil {
 		return "review", err
 	}

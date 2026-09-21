@@ -124,6 +124,89 @@ func TestPublicSystemOneAdversarialResponseMatrix(t *testing.T) {
 	}
 }
 
+func TestPublicChoiceArgmaxContract(t *testing.T) {
+	accepted := map[string]struct {
+		body   string
+		choice string
+	}{
+		"tie selected a": {
+			body:   strings.Replace(publicResponseFixture, `"choice":"a","probabilities":{"a":1,"b":0}`, `"choice":"a","probabilities":{"a":0.5,"b":0.5}`, 1),
+			choice: "a",
+		},
+		"tie selected b": {
+			body:   strings.Replace(publicResponseFixture, `"choice":"a","probabilities":{"a":1,"b":0}`, `"choice":"b","probabilities":{"a":0.5,"b":0.5}`, 1),
+			choice: "b",
+		},
+		"small representable difference": {
+			body:   strings.Replace(publicResponseFixture, `"choice":"a","probabilities":{"a":1,"b":0}`, `"choice":"b","probabilities":{"a":0.5,"b":0.5000000000000001}`, 1),
+			choice: "b",
+		},
+	}
+	for name, want := range accepted {
+		t.Run(name, func(t *testing.T) {
+			response, err := publicSystemOne(t, want.body)
+			if err != nil {
+				t.Fatalf("valid argmax rejected: %v", err)
+			}
+			if got := response.Answers["c"].(ChoiceAnswer).Choice; got != want.choice {
+				t.Fatalf("choice = %q, want %q", got, want.choice)
+			}
+		})
+	}
+
+	for name, body := range map[string]string{
+		"lower selected preserves usage": strings.Replace(strings.Replace(publicResponseFixture, `"choice":"a","probabilities":{"a":1,"b":0}`, `"choice":"a","probabilities":{"a":0.4,"b":0.6}`, 1), `"input_tokens":0,"output_tokens":0`, `"input_tokens":12,"output_tokens":34`, 1),
+		"no epsilon":                     strings.Replace(publicResponseFixture, `"choice":"a","probabilities":{"a":1,"b":0}`, `"choice":"a","probabilities":{"a":0.5,"b":0.5000000000000001}`, 1),
+		"extra selected absent":          strings.Replace(publicResponseFixture, `"answers":{`, `"answers":{"extra":{"type":"choice","choice":"x","probabilities":{"y":1},"confidence":0},`, 1),
+		"extra lower selected":           strings.Replace(publicResponseFixture, `"answers":{`, `"answers":{"extra":{"type":"choice","choice":"x","probabilities":{"x":0.25,"y":0.75},"confidence":0},`, 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			response, err := publicSystemOne(t, body)
+			if response != nil {
+				t.Fatalf("protocol failure returned response: %#v", response)
+			}
+			var protocolErr *ProtocolError
+			if !errors.Is(err, ErrProtocol) || !errors.As(err, &protocolErr) || protocolErr.RequestID != "qa-request" {
+				t.Fatalf("wanted ProtocolError, got %#v", err)
+			}
+			if name == "lower selected preserves usage" && (protocolErr.Usage == nil || *protocolErr.Usage != (Usage{InputTokens: 12, OutputTokens: 34})) {
+				t.Fatalf("wanted preserved usage, got %#v", err)
+			}
+		})
+	}
+
+	t.Run("extra known choice is checked intrinsically", func(t *testing.T) {
+		extra := `"extra":{"type":"choice","choice":"x","probabilities":{"x":0.75,"y":0.25},"confidence":0},`
+		response, err := publicSystemOne(t, strings.Replace(publicResponseFixture, `"answers":{`, `"answers":{`+extra, 1))
+		if err != nil {
+			t.Fatalf("valid extra choice rejected: %v", err)
+		}
+		if got := response.Answers["extra"].(ChoiceAnswer).Choice; got != "x" {
+			t.Fatalf("extra choice = %q, want x", got)
+		}
+	})
+}
+
+func TestPublicChoiceAllowsEmptyLabel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"model":"m","answers":{"q":{"type":"choice","choice":"","probabilities":{"":1,"other":0},"confidence":1}},"usage":{"input_tokens":0,"output_tokens":0}}`)
+	}))
+	defer server.Close()
+	client, err := NewClient(WithAPIKey("key"), WithBaseURL(server.URL), noRetry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := client.SystemOne(context.Background(), SystemOneRequest{State: "state", Model: "m", Questions: map[string]Question{
+		"q": Choice("choose", map[string]Content{"": "empty label", "other": "other label"}),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Answers["q"].(ChoiceAnswer).Choice != "" {
+		t.Fatal("empty selected label was rewritten")
+	}
+}
+
 func TestPublicSystemOneBaselineZerosAndAdditiveFields(t *testing.T) {
 	body := strings.Replace(publicResponseFixture, `"model":"m"`, `"model":"m","future_root":{"private-response-marker":true}`, 1)
 	body = strings.Replace(body, `"type":"choice"`, `"type":"choice","future_answer":[1,null]`, 1)

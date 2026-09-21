@@ -125,7 +125,9 @@ Caller cancellation and deadlines remain detectable with `errors.Is`. API errors
 
 ## API and model semantics
 
-Choice's documented service/model limit is 255 options and Score's documented service/model limit is 10 criteria; larger calls may be rejected remotely. The wire schema currently has no Choice maximum and permits one Score criterion, so the client does not impose those service guidance limits. Use at least two Score criteria for meaningful scoring.
+Choice's documented service/model limit is 255 options and Score's documented service/model limit is 10 criteria; larger calls may be rejected remotely. The wire schema currently has no Choice maximum, permits empty Choice labels, and permits one Score criterion, so the client does not impose those service guidance limits. Use at least two Score criteria for meaningful scoring.
+
+For every Choice answer, the selected label must exist in the returned probabilities and no other probability may be strictly greater. Ties may select either tied label. This is an exact comparison with no epsilon or value rewriting. Existing finite `[0,1]`, membership, full requested-key, Score bounds, contiguous Score-key, and probability/legend key-equality checks remain in force. The SDK does not require probability sums, recompute/compare Score, compare legend content, or infer cross-question relationships. Token counts must be nonnegative as SDK semantic validation even though the current schema declares integers without a `minimum`. The response model is the resolved model reported by the service and need not equal a requested alias.
 
 Jev is a fast RLCD parallel decision model—not chat, generation, tool execution, or a source of reasoning traces. Confidence is a model statistic, not the probability that an answer is correct. Adversarial state can steer output. Applications own thresholds, independent authorization, data classification, and every resulting action; SDK results must never be the sole authorization for a sensitive action.
 

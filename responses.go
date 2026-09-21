@@ -141,6 +141,9 @@ func decodeSystemOne(data []byte, requestID string, expected map[string]expected
 			if a.Choice == nil || !ok || a.Confidence == nil || !finiteRange(*a.Confidence, 0, 1) {
 				return nil, invalid("answers", "invalid choice")
 			}
+			if !choiceIsArgmax(*a.Choice, probabilities) {
+				return nil, invalid("answers", "choice is not maximum probability")
+			}
 			if requested {
 				if want.kind != "choice" {
 					return nil, invalid("answers", "wrong answer type")
@@ -230,6 +233,19 @@ func numericMap(raw *map[string]*float64) (map[string]float64, bool) {
 		out[key] = *value
 	}
 	return out, true
+}
+
+func choiceIsArgmax(choice string, probabilities map[string]float64) bool {
+	selected, ok := probabilities[choice]
+	if !ok {
+		return false
+	}
+	for _, probability := range probabilities {
+		if probability > selected {
+			return false
+		}
+	}
+	return true
 }
 
 func sameKeys(values map[string]float64, keys map[string]struct{}) bool {

@@ -30,7 +30,7 @@ All three are MIT licensed (2026 copyrights respectively Unimatrix, Stumble, and
 
 ## 2. Source-of-truth and discrepancy policy
 
-Wire types follow the live OpenAPI 3.1 schema at `https://api.typesafe.ai/openapi.json`, API version 0.2.0, as observed on 2026-09-21. Documentation gives model-use guidance, not stricter client-side wire validation. Record the following in `docs/contract.md` and do not silently combine them:
+Wire types follow the live OpenAPI 3.1 schema at `https://api.typesafe.ai/openapi.json`, API version 0.2.0, as observed on 2026-09-21. The exact 14,158-byte document is checked in at `testdata/openapi.json` (SHA-256 `a191f8a7df6bd6fedced8120dd0fd106f88575d1d1c8360d08900a6c7c0360d5`) and verified offline. Official API/primitive documentation gives prose semantics and model-use guidance, not permission to remove existing trust-boundary validation. Record the following in `docs/contract.md` and do not silently combine them:
 
 | Topic | Live schema / Python 0.7.0 | Other documentation/client | Client decision |
 |---|---|---|---|
@@ -40,6 +40,8 @@ Wire types follow the live OpenAPI 3.1 schema at `https://api.typesafe.ai/openap
 | Score level null | Excluded | Advanced docs and JS accept null | Reject null Score entries before I/O. |
 | State null | Excluded | JS accepts null | Reject root null before I/O. |
 | Score legend values | String, object, or array | API prose says strings | Decode and preserve structured values. |
+| Choice selection | `choice` is described as the highest-probability option; empty object keys are not excluded | Choice/API prose says highest probability | Require the selected key in returned probabilities and no strictly greater value. Permit ties and empty labels; use exact `>` with no epsilon or rewriting, including extra known Choice answers. |
+| Usage counts | Integer with no `minimum` keyword | Counts are semantically nonnegative | Retain nonnegative `int` validation as an explicit SDK semantic check, not a schema minimum. |
 | Probability bounds | Descriptions specify 0–1 but omit machine-readable bound keywords | Public API semantics define probabilities on 0–1 | Require finite values in the inclusive 0–1 range; retain tests rejecting negative values and values above 1. |
 | Unknown answer variants | Wire currently has three | Python drops them; JS casts unchecked | A missing, malformed, unknown, or wrong-kind requested answer is a `ProtocolError`; never silently omit it. Ignore unknown object fields for additive compatibility. |
 
@@ -136,7 +138,7 @@ type Model struct { Name, Description, ReleaseDate string }
 type ModelsResponse struct { Models []Model; RequestID string }
 ```
 
-Decode through private pointer-bearing wire structs so a required field missing/null is distinguishable from a legitimate zero or empty value. Require response `model`, `answers`, both usage counts, and every schema-required answer field. Usage counts remain `int`, must be nonnegative, and have no additional SDK maximum. Validate finite probabilities/confidence/score and schema ranges (`noul` and confidence in [0,1]); do not normalize distributions, require exact sums, recompute confidence, round scores, compare legends to requests, or replace server values. Score is the zero-based fractional expected index. Legend keys and probability keys stay strings exactly as sent.
+Decode through private pointer-bearing wire structs so a required field missing/null is distinguishable from a legitimate zero or empty value. Require response `model`, `answers`, both usage counts, and every schema-required answer field. Usage counts remain `int`, must be nonnegative as SDK semantic validation despite the schema having no `minimum`, and have no additional SDK maximum. Validate finite probabilities/confidence/score and schema ranges (`noul` and confidence in [0,1]); do not normalize distributions, require exact sums, recompute confidence, recompute or compare Score, round scores, compare legend content to requests, or impose cross-question invariants. A Choice selection must be a key in its returned probabilities and no other probability may be strictly greater; ties are accepted using exact `>` with no epsilon or rewriting, including for extra known Choice answers. Empty choice labels remain valid. Retain Score's requested bounds, contiguous canonical probability keys, exact probability/legend key equality, and finite/range checks. Score is the zero-based fractional expected index. Legend keys and probability keys stay strings exactly as sent. The response model is the service-resolved model and need not equal the requested alias.
 
 Before typed model or answer decoding, validate the complete JSON document and reject duplicate keys globally, then independently extract usage. On an otherwise invalid 2xx System One response, return a nil response and attach usage to `ProtocolError` only when both counts are present, non-null, nonnegative integers representable by `int`; never return partial answers. Malformed/incomplete JSON or invalid usage retains no usage metadata. This additive public error field may break external unkeyed struct literals, which is accepted for the pre-v1 API.
 
@@ -233,7 +235,7 @@ Each acceptance ID must appear in a test name or a short adjacent test comment, 
 - **AC-API-04:** Score accepts one level and more than ten; Choice can exceed 255. Tests make clear these are wire-contract checks, not model-quality recommendations.
 - **AC-API-05:** blank API key or explicit default model, empty questions/ID, typed-nil question, invalid JSON, NaN/infinity, and unsupported roots fail without an HTTP attempt.
 - **AC-API-06:** response zero values (`noul:0`, `score:0`, `confidence:0`, token counts 0) decode successfully; omission/null of each required field fails distinctly as `ProtocolError`.
-- **AC-API-07:** missing requested answer, wrong discriminator, unknown discriminator, malformed answer, out-of-range/non-finite schema values fail safely; additive object fields do not.
+- **AC-API-07:** missing requested answer, wrong discriminator, unknown discriminator, malformed answer, out-of-range/non-finite schema values, or a Choice whose selected key is absent or strictly below another returned probability fail safely; Choice ties (either selected), empty labels, and exact representable differences are covered, including intrinsic checks on extra known Choice answers; additive object fields do not fail.
 - **AC-API-08:** distributions, confidence, scores, score keys, and structured legends are returned exactly without normalization/recomputation/rounding; model names are never allowlisted.
 - **AC-API-09:** models decode aliases/cards, validate real dates, permit an empty list, and expose response request ID.
 

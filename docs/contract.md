@@ -1,10 +1,10 @@
 # API and model contract
 
-Observed 2026-09-21 from the public [OpenAPI document](https://api.typesafe.ai/openapi.json), API v0.2.0; behavior was not verified with a paid live call during implementation. The [model documentation](https://docs.typesafe.ai/) remains authoritative for volatile availability, privacy, pricing, throughput, token windows, and model guidance.
+Observed 2026-09-21 from the public [OpenAPI document](https://api.typesafe.ai/openapi.json), API v0.2.0; the exact reviewed bytes are checked in at [`testdata/openapi.json`](../testdata/openapi.json) with provenance and SHA-256 in [`testdata/README.md`](../testdata/README.md). Behavior was not verified with a paid live call during implementation. The official [API reference](https://docs.typesafe.ai/api), [Choice documentation](https://docs.typesafe.ai/primitives/choice), and [model documentation](https://docs.typesafe.ai/models) provide prose semantics and volatile service guidance.
 
 ## Endpoints and data
 
-`Client.SystemOne` posts `state`, a resolved `model`, and typed `questions` to the configured base-path prefix plus `/v1/systemone`. `Client.ListModels` gets the same prefix plus `/v1/models`. Gateway prefixes retain their escaped path representation. Both return `x-typesafe-request-id` as explicit response/error metadata. Request IDs and all service data are untrusted; default error text omits request IDs and arbitrary service strings.
+`Client.SystemOne` posts `state`, a resolved `model`, and typed `questions` to the configured base-path prefix plus `/v1/systemone`. The requested model may be an alias; the response model is the service-resolved name and is preserved unchanged, so equality is not required. `Client.ListModels` gets the same prefix plus `/v1/models`. Gateway prefixes retain their escaped path representation. Both return `x-typesafe-request-id` as constrained, untrusted response/error metadata. Request IDs and all service data are untrusted; default error text omits request IDs and arbitrary service strings.
 
 ## Authentication and gateway transports
 
@@ -19,7 +19,7 @@ An authenticated transport is commonly used with an explicit trusted gateway URL
 
 State must be a non-null JSON string, object, or array. Instructions may be omitted/null or a string, object, or array. Noul criteria are optional and may contain null values. Choice criteria are an object whose values may also be null. Score criteria are ordered, non-null strings, objects, or arrays.
 
-Responses preserve finite service probabilities, confidence, fractional Score values, string keys, structured legends, and nonnegative `int` token counts (including zero, with no invented local maximum). The client does not normalize probability sums, recompute confidence, round scores, compare legends to requests, or replace server values. It does require the complete requested probability-key set, and rejects negative usage, unknown/mismatched requested answer variants, a Choice outside the requested options, out-of-set probability keys, and Score probability keys outside requested levels. Additive object fields remain compatible. Duplicate JSON object keys are rejected as ambiguous protocol data.
+Responses preserve finite service probabilities, confidence, fractional Score values, string keys, structured legends, and nonnegative `int` token counts (including zero, with no invented local maximum). Nonnegative token counts are an SDK semantic validation at the trust boundary; the current `Usage` schema says integer but has no `minimum`. For Choice, the selected key must occur in the returned probability map and no returned probability may be strictly greater. Ties are valid, comparison is exact `>`, and the SDK applies no epsilon or rewriting; this intrinsic rule also applies to accepted extra Choice answers. The client does not normalize or require probability sums, recompute or compare Score, recompute confidence, round scores, compare legend content to requests, or add cross-question invariants. It does require the complete requested probability-key set, and rejects negative usage, unknown/mismatched requested answer variants, a Choice outside the requested options, out-of-set probability keys, and Score values outside the requested zero-based bounds. Score probability keys must be contiguous canonical decimal indices and exactly equal the legend keys; all probability/confidence values retain finite inclusive `[0,1]` checks. Additive object fields remain compatible. Duplicate JSON object keys are rejected as ambiguous protocol data.
 
 ## Schema and documentation discrepancies
 
@@ -31,6 +31,8 @@ Responses preserve finite service probabilities, confidence, fractional Score va
 | Score level null | Excluded | Older advanced/JS docs accepted null | Reject before I/O. |
 | State null | Excluded | Older JS accepted null | Reject before I/O. |
 | Score legend values | String, object, or array | API prose emphasizes strings | Decode and preserve structured values. |
+| Choice selection | `choice` is the highest-probability option; schema does not exclude an empty option key | API prose also calls it the highest-probability option | Require membership in returned probabilities and reject only when another value is strictly greater; ties and empty labels are valid, with no numeric tolerance. |
+| Usage counts | Integer, with no machine-readable `minimum` | Token counts are semantically nonnegative | Require nonnegative values as explicit semantic validation, not as a claimed schema bound. |
 | Probability bounds | Schema descriptions specify 0–1, but omit machine-readable minimum/maximum keywords | Public API semantics define probabilities on 0–1 | Enforce finite values in the inclusive 0–1 range; this semantic validation is intentional. |
 | Unknown answer variants | Three wire variants | Some clients drop/cast them | Return `ProtocolError`; never silently omit requested answers. |
 

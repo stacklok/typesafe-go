@@ -113,7 +113,7 @@ func TestPublicTransportClosesEveryResponseBodyExactlyOnce(t *testing.T) {
 				headers.Set("x-typesafe-request-id", "close-id")
 				return &http.Response{StatusCode: test.status, Header: headers, Body: body}, nil
 			})
-			client, err := NewClient("key", WithHTTPClient(&http.Client{Transport: rt}), WithResponseLimit(test.limit), noRetry())
+			client, err := NewClient(WithAPIKey("key"), WithHTTPClient(&http.Client{Transport: rt}), WithResponseLimit(test.limit), noRetry())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -152,7 +152,7 @@ func TestPublicTransportCancellationClosesBodyExactlyOnceAndReturnsCause(t *test
 	})
 	policy := DefaultRetryPolicy()
 	policy.MaxRetries = 0
-	client, err := NewClient("key", WithHTTPClient(&http.Client{Transport: rt}), WithAttemptTimeout(time.Minute), WithRetryPolicy(policy))
+	client, err := NewClient(WithAPIKey("key"), WithHTTPClient(&http.Client{Transport: rt}), WithAttemptTimeout(time.Minute), WithRetryPolicy(policy))
 	if err != nil {
 		t.Fatal(err)
 	}

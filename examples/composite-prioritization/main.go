@@ -19,7 +19,7 @@ func priority(impactWeight float64) (float64, error) {
 	defer s.Close()
 	p := typesafe.DefaultRetryPolicy()
 	p.MaxRetries = 0
-	client, err := typesafe.NewClient("synthetic", typesafe.WithBaseURL(s.URL), typesafe.WithRetryPolicy(p))
+	client, err := typesafe.NewClient(typesafe.WithAPIKey("synthetic"), typesafe.WithBaseURL(s.URL), typesafe.WithRetryPolicy(p))
 	if err != nil {
 		return 0, err
 	}

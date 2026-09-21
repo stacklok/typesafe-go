@@ -239,7 +239,10 @@ func (c *Client) call(ctx context.Context, method, path string, payload []byte) 
 
 func (c *Client) attempt(ctx context.Context, method, path string, payload []byte, attempt int) ([]byte, string, http.Header, error, bool) {
 	u := *c.baseURL
-	u.Path = path
+	u.Path += path
+	if u.RawPath != "" {
+		u.RawPath += path
+	}
 	var body io.Reader
 	if payload != nil {
 		body = bytes.NewReader(payload)
@@ -248,7 +251,9 @@ func (c *Client) attempt(ctx context.Context, method, path string, payload []byt
 	if err != nil {
 		return nil, "", nil, errors.New("typesafe: cannot create request"), false
 	}
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("X-Typesafe-Retry-Count", strconv.Itoa(attempt))
@@ -302,7 +307,7 @@ func (c *Client) attempt(ctx context.Context, method, path string, payload []byt
 }
 
 func sanitizeRequestID(id, apiKey string) string {
-	if id == "" || len(id) > 128 || strings.Contains(id, apiKey) {
+	if id == "" || len(id) > 128 || apiKey != "" && strings.Contains(id, apiKey) {
 		return ""
 	}
 	for _, r := range id {

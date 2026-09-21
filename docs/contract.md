@@ -4,7 +4,18 @@ Observed 2026-09-21 from the public [OpenAPI document](https://api.typesafe.ai/o
 
 ## Endpoints and data
 
-`Client.SystemOne` posts `state`, a resolved `model`, and typed `questions` to `/v1/systemone`. `Client.ListModels` gets `/v1/models`. Both use bearer authentication and return `x-typesafe-request-id` as explicit response/error metadata. Request IDs and all service data are untrusted; default error text omits request IDs and arbitrary service strings.
+`Client.SystemOne` posts `state`, a resolved `model`, and typed `questions` to the configured base-path prefix plus `/v1/systemone`. `Client.ListModels` gets the same prefix plus `/v1/models`. Gateway prefixes retain their escaped path representation. Both return `x-typesafe-request-id` as explicit response/error metadata. Request IDs and all service data are untrusted; default error text omits request IDs and arbitrary service strings.
+
+## Authentication and gateway transports
+
+Construction requires exactly one explicit strategy:
+
+- `WithAPIKey(key)`, optionally with one `WithHTTPClient(client)`, makes the SDK set bearer authentication. `WithHTTPClient` only customizes that API-key transport and does not authenticate by itself.
+- `WithAuthenticatedHTTPClient(client)` alone declares that the supplied transport owns authentication. The SDK leaves `Authorization` untouched and invokes that transport on every attempt.
+
+Duplicate selectors, and combinations of `WithAuthenticatedHTTPClient` with `WithAPIKey` or `WithHTTPClient`, fail regardless of option order. Errors name the relevant options and direct callers to a valid selection. The SDK does not verify authenticated transports, decode tokens, or depend on an OAuth package.
+
+An authenticated transport is commonly used with an explicit trusted gateway URL, for example `WithBaseURL("https://gateway.example.com/typesafe")`, where the gateway owns OAuth. Without that base URL, the default direct TypeSafe endpoint is intended for SDK-managed API-key authentication. Applications own OAuth grant flow, token acquisition/refresh, lifecycle context, and token-endpoint TLS/timeouts. An inference request context may not bound token acquisition by a client or source that captured another context; bound that work separately with application-owned lifecycle context and HTTP client. See the concrete [README gateway example](../README.md#use).
 
 State must be a non-null JSON string, object, or array. Instructions may be omitted/null or a string, object, or array. Noul criteria are optional and may contain null values. Choice criteria are an object whose values may also be null. Score criteria are ordered, non-null strings, objects, or arrays.
 

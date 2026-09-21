@@ -37,7 +37,7 @@ func TestACDOC03RAGRankingIsOrderedAndConcurrencyBounded(t *testing.T) {
 		})
 		policy := typesafe.DefaultRetryPolicy()
 		policy.MaxRetries = 0
-		client, err := typesafe.NewClient("synthetic", typesafe.WithHTTPClient(&http.Client{Transport: rt}), typesafe.WithRetryPolicy(policy))
+		client, err := typesafe.NewClient(typesafe.WithAPIKey("synthetic"), typesafe.WithHTTPClient(&http.Client{Transport: rt}), typesafe.WithRetryPolicy(policy))
 		if err != nil {
 			t.Fatal(err)
 		}

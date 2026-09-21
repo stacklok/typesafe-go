@@ -31,7 +31,7 @@ func TestACREL01StatusRetriesAndDisable(t *testing.T) {
 	for _, status := range []int{408, 429, 500, 529} {
 		var calls atomic.Int32
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); w.WriteHeader(status) }))
-		c, _ := NewClient("x", WithBaseURL(srv.URL), fastRetry(2))
+		c, _ := NewClient(WithAPIKey("x"), WithBaseURL(srv.URL), fastRetry(2))
 		_, _ = c.ListModels(context.Background())
 		srv.Close()
 		if calls.Load() != 3 {
@@ -41,7 +41,7 @@ func TestACREL01StatusRetriesAndDisable(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); w.WriteHeader(500) }))
 	defer srv.Close()
-	c, _ := NewClient("x", WithBaseURL(srv.URL), noRetry())
+	c, _ := NewClient(WithAPIKey("x"), WithBaseURL(srv.URL), noRetry())
 	_, _ = c.ListModels(context.Background())
 	if calls.Load() != 1 {
 		t.Fatalf("MaxRetries 0 made %d attempts", calls.Load())
@@ -69,7 +69,7 @@ func TestACREL02BodyReplayAndMarshalOnce(t *testing.T) {
 	}))
 	defer srv.Close()
 	m := &countMarshaler{}
-	c, _ := NewClient("x", WithBaseURL(srv.URL), fastRetry(1))
+	c, _ := NewClient(WithAPIKey("x"), WithBaseURL(srv.URL), fastRetry(1))
 	_, err := c.SystemOne(context.Background(), SystemOneRequest{State: m, Model: "m", Questions: map[string]Question{"q": Noul(nil, nil)}})
 	if err != nil || m.calls.Load() != 1 {
 		t.Fatalf("err=%v marshals=%d", err, m.calls.Load())
@@ -115,7 +115,7 @@ func TestACREL04BudgetDoesNotRetryEarly(t *testing.T) {
 	p := DefaultRetryPolicy()
 	p.TotalBudget = 50 * time.Millisecond
 	p.MaxRetries = 2
-	c, _ := NewClient("x", WithBaseURL(srv.URL), WithRetryPolicy(p))
+	c, _ := NewClient(WithAPIKey("x"), WithBaseURL(srv.URL), WithRetryPolicy(p))
 	start := time.Now()
 	_, err := c.ListModels(context.Background())
 	var apiErr *APIError
@@ -130,7 +130,7 @@ func TestACREL05CancellationAndTimeout(t *testing.T) {
 	p := DefaultRetryPolicy()
 	p.MaxRetries = 0
 	p.TotalBudget = time.Second
-	c, _ := NewClient("x", WithBaseURL(srv.URL), WithAttemptTimeout(10*time.Millisecond), WithRetryPolicy(p))
+	c, _ := NewClient(WithAPIKey("x"), WithBaseURL(srv.URL), WithAttemptTimeout(10*time.Millisecond), WithRetryPolicy(p))
 	_, err := c.ListModels(context.Background())
 	if !errors.Is(err, ErrAttemptTimeout) || !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("timeout chain lost: %v", err)
@@ -147,7 +147,7 @@ func TestACREL06ProtocolAndOversizeNeverRetry(t *testing.T) {
 	for _, body := range []string{`not json`, `xxxxxxxxxxxxxxxx`} {
 		var calls atomic.Int32
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); io.WriteString(w, body) }))
-		c, _ := NewClient("x", WithBaseURL(srv.URL), WithResponseLimit(8), fastRetry(2))
+		c, _ := NewClient(WithAPIKey("x"), WithBaseURL(srv.URL), WithResponseLimit(8), fastRetry(2))
 		_, _ = c.ListModels(context.Background())
 		srv.Close()
 		if calls.Load() != 1 {
@@ -164,7 +164,7 @@ func TestACREL01InterruptedReadRetries(t *testing.T) {
 		}
 		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(bytes.NewBufferString(`{"models":[]}`))}, nil
 	})
-	c, _ := NewClient("x", WithHTTPClient(&http.Client{Transport: rt}), fastRetry(1))
+	c, _ := NewClient(WithAPIKey("x"), WithHTTPClient(&http.Client{Transport: rt}), fastRetry(1))
 	if _, err := c.ListModels(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestPublicRetryConnectionAndAttemptTimeoutFlags(t *testing.T) {
 					policy.BackoffInitial, policy.BackoffMax, policy.BackoffJitter = time.Second, time.Second, 0
 					policy.RetryConnectionErrors = enabled
 					policy.RetryTimeouts = enabled
-					client, err := NewClient("key", WithHTTPClient(&http.Client{Transport: rt}), WithAttemptTimeout(2*time.Second), WithRetryPolicy(policy))
+					client, err := NewClient(WithAPIKey("key"), WithHTTPClient(&http.Client{Transport: rt}), WithAttemptTimeout(2*time.Second), WithRetryPolicy(policy))
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -244,7 +244,7 @@ func TestPublicRetryCountersDefaultMaximum(t *testing.T) {
 	})
 	policy := DefaultRetryPolicy()
 	policy.BackoffInitial, policy.BackoffMax, policy.BackoffJitter = 0, 0, 0
-	client, err := NewClient("key", WithHTTPClient(&http.Client{Transport: rt}), WithRetryPolicy(policy))
+	client, err := NewClient(WithAPIKey("key"), WithHTTPClient(&http.Client{Transport: rt}), WithRetryPolicy(policy))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +264,7 @@ func TestPublicRetryBackoffReturnsCallerCauseWithoutNextAttempt(t *testing.T) {
 	})
 	policy := DefaultRetryPolicy()
 	policy.TotalBudget = time.Minute
-	client, _ := NewClient("key", WithHTTPClient(&http.Client{Transport: rt}), WithRetryPolicy(policy))
+	client, _ := NewClient(WithAPIKey("key"), WithHTTPClient(&http.Client{Transport: rt}), WithRetryPolicy(policy))
 	ctx, cancel := context.WithCancelCause(context.Background())
 	cause := errors.New("caller stopped during backoff")
 	done := make(chan error, 1)
@@ -290,7 +290,7 @@ func TestPublicRetryCallerDeadlineDuringBackoffReturnsCauseWithoutNextAttempt(t 
 		})
 		policy := DefaultRetryPolicy()
 		policy.TotalBudget = time.Minute
-		client, _ := NewClient("key", WithHTTPClient(&http.Client{Transport: rt}), WithRetryPolicy(policy))
+		client, _ := NewClient(WithAPIKey("key"), WithHTTPClient(&http.Client{Transport: rt}), WithRetryPolicy(policy))
 		cause := errors.New("caller deadline cause")
 		deadlineCtx, cancel := context.WithTimeoutCause(context.Background(), 5*time.Second, cause)
 		defer cancel()
@@ -336,7 +336,7 @@ func TestRetryAfterPrecedenceAndBudgetsScheduleActualRetry(t *testing.T) {
 				policy.MaxRetries = 1
 				policy.TotalBudget = 10 * time.Second
 				policy.BackoffInitial, policy.BackoffMax, policy.BackoffJitter = time.Second, time.Second, 0
-				client, _ := NewClient("key", WithHTTPClient(&http.Client{Transport: rt}), WithRetryPolicy(policy))
+				client, _ := NewClient(WithAPIKey("key"), WithHTTPClient(&http.Client{Transport: rt}), WithRetryPolicy(policy))
 				if _, err := client.ListModels(context.Background()); err != nil {
 					t.Fatal(err)
 				}
@@ -362,7 +362,7 @@ func TestRetryAfterPrecedenceAndBudgetsScheduleActualRetry(t *testing.T) {
 				policy := DefaultRetryPolicy()
 				policy.MaxRetries = 1
 				policy.BackoffInitial, policy.BackoffMax, policy.BackoffJitter = time.Second, time.Second, 0
-				client, _ := NewClient("key", WithHTTPClient(&http.Client{Transport: rt}), WithRetryPolicy(policy))
+				client, _ := NewClient(WithAPIKey("key"), WithHTTPClient(&http.Client{Transport: rt}), WithRetryPolicy(policy))
 				if _, err := client.ListModels(context.Background()); err != nil {
 					t.Fatal(err)
 				}
@@ -388,7 +388,7 @@ func TestRetryAfterPrecedenceAndBudgetsScheduleActualRetry(t *testing.T) {
 			policy := DefaultRetryPolicy()
 			policy.MaxRetries = 1
 			policy.TotalBudget = 10 * time.Second
-			client, _ := NewClient("key", WithHTTPClient(&http.Client{Transport: rt}), WithRetryPolicy(policy))
+			client, _ := NewClient(WithAPIKey("key"), WithHTTPClient(&http.Client{Transport: rt}), WithRetryPolicy(policy))
 			_, err := client.ListModels(context.Background())
 			var api *APIError
 			if !errors.As(err, &api) || calls != 1 || time.Since(start) != 0 {
@@ -407,7 +407,7 @@ func TestRetryAfterPrecedenceAndBudgetsScheduleActualRetry(t *testing.T) {
 				})
 				policy := DefaultRetryPolicy()
 				policy.TotalBudget = 2 * time.Second
-				client, _ := NewClient("key", WithHTTPClient(&http.Client{Transport: rt}), WithRetryPolicy(policy))
+				client, _ := NewClient(WithAPIKey("key"), WithHTTPClient(&http.Client{Transport: rt}), WithRetryPolicy(policy))
 				ctx := context.Background()
 				if callerDeadline {
 					var cancel context.CancelFunc
@@ -447,7 +447,7 @@ func TestRetryPolicyValidationErrorsArePerField(t *testing.T) {
 	cases["retry.total_budget"] = p
 	for name, policy := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, err := NewClient("key", WithRetryPolicy(policy))
+			_, err := NewClient(WithAPIKey("key"), WithRetryPolicy(policy))
 			var validation *ValidationError
 			if !errors.As(err, &validation) || validation.Reason != "out of range" || !strings.HasPrefix(name, validation.Field) {
 				t.Fatalf("error=%#v", err)
@@ -487,7 +487,7 @@ func TestCancellationAndTimeoutCloseResponseBody(t *testing.T) {
 			})
 			p := DefaultRetryPolicy()
 			p.MaxRetries = 0
-			c, err := NewClient("x", WithHTTPClient(&http.Client{Transport: rt}), WithAttemptTimeout(20*time.Millisecond), WithRetryPolicy(p))
+			c, err := NewClient(WithAPIKey("x"), WithHTTPClient(&http.Client{Transport: rt}), WithAttemptTimeout(20*time.Millisecond), WithRetryPolicy(p))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -526,7 +526,7 @@ func TestSystemOneUsesSerializedQuestionSnapshot(t *testing.T) {
 		<-release
 		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(bytes.NewBufferString(`{"model":"m","answers":{"q":{"type":"choice","choice":"yes","probabilities":{"yes":1},"confidence":1}},"usage":{"input_tokens":1,"output_tokens":1}}`))}, nil
 	})
-	client, err := NewClient("x", WithHTTPClient(&http.Client{Transport: rt}), noRetry())
+	client, err := NewClient(WithAPIKey("x"), WithHTTPClient(&http.Client{Transport: rt}), noRetry())
 	if err != nil {
 		t.Fatal(err)
 	}

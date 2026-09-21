@@ -27,6 +27,10 @@ type config struct {
 	attemptTimeout time.Duration
 	retry          RetryPolicy
 	responseLimit  int64
+	apiKey         string
+	apiKeySet      bool
+	httpClientSet  bool
+	authClientSet  bool
 }
 
 func defaultConfig() config {
@@ -37,17 +41,48 @@ func defaultConfig() config {
 	}
 }
 
-// WithBaseURL changes the API endpoint. HTTP is accepted only for loopback hosts.
+// WithAPIKey configures SDK-managed bearer authentication. The key is never
+// read from the environment. It may be combined with one WithHTTPClient.
+// It cannot be combined with WithAuthenticatedHTTPClient.
+func WithAPIKey(apiKey string) Option {
+	return func(c *config) error {
+		if c.apiKeySet {
+			return errors.New("typesafe: WithAPIKey configured more than once; use one WithAPIKey")
+		}
+		if c.authClientSet {
+			return errors.New("typesafe: WithAPIKey conflicts with WithAuthenticatedHTTPClient; choose one authentication strategy")
+		}
+		if strings.TrimSpace(apiKey) == "" || strings.ContainsAny(apiKey, "\r\n") {
+			return &ValidationError{Field: "api_key", Reason: "invalid value"}
+		}
+		c.apiKey = apiKey
+		c.apiKeySet = true
+		return nil
+	}
+}
+
+// WithBaseURL changes the API endpoint while preserving any configured path
+// prefix. HTTP is accepted only for loopback hosts.
 func WithBaseURL(raw string) Option {
 	return func(c *config) error {
 		u, err := url.Parse(raw)
-		if err != nil || u.Host == "" || u.Path != "" && u.Path != "/" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		if err != nil || u.Host == "" || u.Scheme == "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.User != nil || strings.Contains(raw, "#") {
 			return errors.New("typesafe: invalid base URL")
 		}
 		if u.Scheme != "https" && !(u.Scheme == "http" && isLoopbackHost(u.Hostname())) {
 			return errors.New("typesafe: base URL must use HTTPS (HTTP is allowed only on loopback)")
 		}
-		u.Path = strings.TrimSuffix(u.Path, "/")
+		for _, segment := range strings.Split(u.Path, "/") {
+			if segment == "." || segment == ".." {
+				return errors.New("typesafe: invalid base URL")
+			}
+		}
+		if strings.HasSuffix(u.EscapedPath(), "/") {
+			u.Path = strings.TrimSuffix(u.Path, "/")
+			if u.RawPath != "" {
+				u.RawPath = strings.TrimSuffix(u.RawPath, "/")
+			}
+		}
 		c.baseURL = u
 		return nil
 	}
@@ -61,14 +96,45 @@ func isLoopbackHost(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// WithHTTPClient copies client and disables redirects on the copy. The caller's
-// transport must be safe for concurrent use when the resulting Client is shared.
+// WithHTTPClient copies a client for transport customization in API-key mode.
+// It does not authenticate: use it with WithAPIKey. It cannot be combined with
+// WithAuthenticatedHTTPClient.
 func WithHTTPClient(client *http.Client) Option {
 	return func(c *config) error {
 		if client == nil {
-			return errors.New("typesafe: HTTP client is nil")
+			return errors.New("typesafe: WithHTTPClient client is nil")
+		}
+		if c.httpClientSet {
+			return errors.New("typesafe: WithHTTPClient configured more than once; use one WithHTTPClient")
+		}
+		if c.authClientSet {
+			return errors.New("typesafe: WithHTTPClient conflicts with WithAuthenticatedHTTPClient; choose one client option")
 		}
 		c.httpClient = *client
+		c.httpClientSet = true
+		return nil
+	}
+}
+
+// WithAuthenticatedHTTPClient copies a client whose transport owns
+// authentication. The SDK leaves the Authorization header untouched. Use it
+// alone; it cannot be combined with WithAPIKey or WithHTTPClient.
+func WithAuthenticatedHTTPClient(client *http.Client) Option {
+	return func(c *config) error {
+		if client == nil {
+			return errors.New("typesafe: WithAuthenticatedHTTPClient client is nil")
+		}
+		if c.authClientSet {
+			return errors.New("typesafe: WithAuthenticatedHTTPClient configured more than once; use one WithAuthenticatedHTTPClient")
+		}
+		if c.apiKeySet {
+			return errors.New("typesafe: WithAuthenticatedHTTPClient conflicts with WithAPIKey; choose one authentication strategy")
+		}
+		if c.httpClientSet {
+			return errors.New("typesafe: WithAuthenticatedHTTPClient conflicts with WithHTTPClient; choose one client option")
+		}
+		c.httpClient = *client
+		c.authClientSet = true
 		return nil
 	}
 }
@@ -130,12 +196,11 @@ type Client struct {
 	responseLimit  int64
 }
 
-// NewClient constructs a client without performing network access. The API key
-// is explicit; the SDK never reads it from the environment.
-func NewClient(apiKey string, opts ...Option) (*Client, error) {
-	if strings.TrimSpace(apiKey) == "" || strings.ContainsAny(apiKey, "\r\n") {
-		return nil, &ValidationError{Field: "api_key", Reason: "invalid value"}
-	}
+// NewClient constructs a client without performing network access or reading
+// credentials from the environment. Exactly one authentication strategy is
+// required: WithAPIKey, optionally with WithHTTPClient, or
+// WithAuthenticatedHTTPClient alone. WithHTTPClient alone does not authenticate.
+func NewClient(opts ...Option) (*Client, error) {
 	cfg := defaultConfig()
 	for _, opt := range opts {
 		if opt == nil {
@@ -145,12 +210,15 @@ func NewClient(apiKey string, opts ...Option) (*Client, error) {
 			return nil, err
 		}
 	}
+	if cfg.apiKeySet == cfg.authClientSet {
+		return nil, errors.New("typesafe: authentication is required; use WithAPIKey or WithAuthenticatedHTTPClient (WithHTTPClient only customizes API-key transport)")
+	}
 	if err := cfg.retry.validate(); err != nil {
 		return nil, err
 	}
 	cfg.httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	u := *cfg.baseURL
-	return &Client{apiKey: apiKey, baseURL: &u, httpClient: cfg.httpClient, defaultModel: cfg.defaultModel,
+	return &Client{apiKey: cfg.apiKey, baseURL: &u, httpClient: cfg.httpClient, defaultModel: cfg.defaultModel,
 		attemptTimeout: cfg.attemptTimeout, retry: cfg.retry, responseLimit: cfg.responseLimit}, nil
 }
 

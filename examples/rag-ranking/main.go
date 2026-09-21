@@ -37,7 +37,7 @@ func rankAll(docs []string) ([]ranking, error) {
 
 	policy := typesafe.DefaultRetryPolicy()
 	policy.MaxRetries = 0
-	client, err := typesafe.NewClient("synthetic", typesafe.WithBaseURL(server.URL), typesafe.WithRetryPolicy(policy))
+	client, err := typesafe.NewClient(typesafe.WithAPIKey("synthetic"), typesafe.WithBaseURL(server.URL), typesafe.WithRetryPolicy(policy))
 	if err != nil {
 		return nil, err
 	}

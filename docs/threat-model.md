@@ -7,11 +7,11 @@ Assets are the bearer token, request state/questions, model answers, usage metad
 ## Mitigations
 
 - Credentials are explicit. API keys are rejected when blank/newline-containing, placed only in protected Authorization headers, and redacted from client formatting, JSON, and slog. API-key mode permits an ordinary transport client only as customization; it does not authenticate without `WithAPIKey`. Alternatively, an authenticated caller transport owns the header and credential lifecycle; the SDK never inspects or modifies it. An authenticated transport should use an explicit trusted gateway base URL when OAuth is gateway-owned, rather than the direct API-key endpoint.
-- HTTPS is mandatory except explicit loopback HTTP. Gateway path prefixes and their escaping are preserved while dot segments, queries, fragments, and userinfo are rejected. Redirects are not followed in either authentication mode, including with a supplied client, preventing token/body forwarding. Caller clients are copied rather than mutated.
+- HTTPS is mandatory except explicit loopback HTTP. Gateway path prefixes and their escaping are preserved while dot segments, queries, fragments, and userinfo are rejected. Redirects are not followed in either authentication mode, including with a supplied client, preventing token/body forwarding. Caller client values are copied rather than mutated, but transports remain shared; callers own idle-connection cleanup and the SDK adds no `Close` method.
 - Requests are marshaled once into SDK-owned bytes. Responses are bounded after transport decompression; bodies are always closed. Ambiguous duplicate keys and malformed/mismatched/out-of-set answers are protocol errors.
 - Default errors omit payloads, arbitrary service strings, selected question IDs, and attacker-controlled request IDs. Request IDs remain explicitly inspectable metadata for callers that choose to log them safely.
 - There is no implicit logger, telemetry, cache, payload persistence, environment lookup, or model allowlist.
-- Per-attempt and total contexts cover sends, reads, and waits. Caller cancellation is not retried.
+- Per-attempt and total contexts cover HTTP sends, body reads, and retry waits. Caller cancellation is not retried. These contexts do not bound arbitrary caller marshaling/request preparation or synchronous response decoding outside the HTTP call.
 
 ## Residual risks
 

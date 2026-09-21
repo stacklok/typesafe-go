@@ -182,6 +182,169 @@ func (b *brokenBody) Read(p []byte) (int, error) {
 }
 func (*brokenBody) Close() error { return nil }
 
+func TestPublicNon2xxBodyFailuresReturnStatusAPIError(t *testing.T) {
+	cases := []struct {
+		name    string
+		status  int
+		headers http.Header
+		reader  func() io.Reader
+	}{
+		{"unauthorized malformed gzip", 401, http.Header{"Content-Encoding": {"gzip"}}, func() io.Reader { return bytes.NewBufferString("not gzip") }},
+		{"unprocessable interrupted read", 422, nil, func() io.Reader { return &brokenBody{} }},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			var calls atomic.Int32
+			body := &trackingBody{reader: test.reader()}
+			rt := roundTripFunc(func(*http.Request) (*http.Response, error) {
+				calls.Add(1)
+				headers := test.headers.Clone()
+				if headers == nil {
+					headers = make(http.Header)
+				}
+				headers.Set("X-Typesafe-Request-ID", "safe-id")
+				headers.Set("Retry-After", "2")
+				return &http.Response{StatusCode: test.status, Header: headers, Body: body}, nil
+			})
+			policy := DefaultRetryPolicy()
+			policy.BackoffInitial, policy.BackoffMax, policy.BackoffJitter = 0, 0, 0
+			client, err := NewClient(WithAPIKey("key"), WithHTTPClient(&http.Client{Transport: rt}), WithRetryPolicy(policy))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = client.ListModels(context.Background())
+			var apiErr *APIError
+			if !errors.As(err, &apiErr) || apiErr.StatusCode != test.status || apiErr.RequestID != "safe-id" || apiErr.RetryAfter != 2*time.Second {
+				t.Fatalf("API error metadata: %#v", err)
+			}
+			if calls.Load() != 1 || body.closes.Load() != 1 {
+				t.Fatalf("calls=%d closes=%d", calls.Load(), body.closes.Load())
+			}
+		})
+	}
+}
+
+func TestPublicRetryableStatusRetriesBrokenBodiesDespiteDisabledIOFlags(t *testing.T) {
+	cases := []struct {
+		name    string
+		status  int
+		headers http.Header
+		body    func() io.ReadCloser
+	}{
+		{"rate limit malformed gzip", 429, http.Header{"Content-Encoding": {"gzip"}}, func() io.ReadCloser { return io.NopCloser(bytes.NewBufferString("not gzip")) }},
+		{"server interrupted read", 529, nil, func() io.ReadCloser { return &brokenBody{} }},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			var calls atomic.Int32
+			rt := roundTripFunc(func(*http.Request) (*http.Response, error) {
+				if calls.Add(1) == 1 {
+					return &http.Response{StatusCode: test.status, Header: test.headers.Clone(), Body: test.body()}, nil
+				}
+				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(bytes.NewBufferString(`{"models":[]}`))}, nil
+			})
+			policy := DefaultRetryPolicy()
+			policy.MaxRetries = 1
+			policy.BackoffInitial, policy.BackoffMax, policy.BackoffJitter = 0, 0, 0
+			policy.RetryConnectionErrors, policy.RetryTimeouts = false, false
+			client, err := NewClient(WithAPIKey("key"), WithHTTPClient(&http.Client{Transport: rt}), WithRetryPolicy(policy))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := client.ListModels(context.Background()); err != nil || calls.Load() != 2 {
+				t.Fatalf("calls=%d err=%v", calls.Load(), err)
+			}
+		})
+	}
+}
+
+func TestPublicRetryDelaySurvivesBrokenErrorBody(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		var calls int
+		rt := roundTripFunc(func(*http.Request) (*http.Response, error) {
+			calls++
+			if calls == 1 {
+				return &http.Response{StatusCode: 429, Header: http.Header{"Content-Encoding": {"gzip"}, "Retry-After": {"3"}}, Body: io.NopCloser(bytes.NewBufferString("not gzip"))}, nil
+			}
+			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(bytes.NewBufferString(`{"models":[]}`))}, nil
+		})
+		policy := DefaultRetryPolicy()
+		policy.MaxRetries = 1
+		policy.TotalBudget = 10 * time.Second
+		client, err := NewClient(WithAPIKey("key"), WithHTTPClient(&http.Client{Transport: rt}), WithRetryPolicy(policy))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := client.ListModels(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if elapsed := time.Since(start); elapsed != 3*time.Second || calls != 2 {
+			t.Fatalf("elapsed=%v calls=%d", elapsed, calls)
+		}
+	})
+}
+
+func TestPublicNon2xxOversizePrecedesStatusAndNeverRetries(t *testing.T) {
+	var calls atomic.Int32
+	rt := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls.Add(1)
+		return &http.Response{StatusCode: 529, Header: make(http.Header), Body: io.NopCloser(bytes.NewBufferString("too large"))}, nil
+	})
+	client, err := NewClient(WithAPIKey("key"), WithHTTPClient(&http.Client{Transport: rt}), WithResponseLimit(4), fastRetry(2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.ListModels(context.Background())
+	if !errors.Is(err, ErrResponseTooLarge) || calls.Load() != 1 {
+		t.Fatalf("calls=%d err=%v", calls.Load(), err)
+	}
+}
+
+func TestPublicKnownStatusPrecedesAttemptTimeoutButNotCallerCancellation(t *testing.T) {
+	for _, callerCancel := range []bool{false, true} {
+		t.Run("caller_cancel="+strconv.FormatBool(callerCancel), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				body := &cancelBody{started: make(chan struct{}), closed: make(chan struct{})}
+				rt := roundTripFunc(func(*http.Request) (*http.Response, error) {
+					headers := make(http.Header)
+					headers.Set("X-Typesafe-Request-ID", "known-status")
+					return &http.Response{StatusCode: 422, Header: headers, Body: body}, nil
+				})
+				policy := DefaultRetryPolicy()
+				policy.MaxRetries = 0
+				client, err := NewClient(WithAPIKey("key"), WithHTTPClient(&http.Client{Transport: rt}), WithAttemptTimeout(2*time.Second), WithRetryPolicy(policy))
+				if err != nil {
+					t.Fatal(err)
+				}
+				ctx, cancel := context.WithCancelCause(context.Background())
+				defer cancel(nil)
+				done := make(chan error, 1)
+				go func() { _, err := client.ListModels(ctx); done <- err }()
+				<-body.started
+				cause := errors.New("caller canceled")
+				if callerCancel {
+					cancel(cause)
+				}
+				err = <-done
+				if callerCancel {
+					if !errors.Is(err, cause) {
+						t.Fatalf("caller cause lost: %v", err)
+					}
+				} else {
+					var apiErr *APIError
+					if !errors.As(err, &apiErr) || apiErr.StatusCode != 422 || apiErr.RequestID != "known-status" {
+						t.Fatalf("known status lost: %v", err)
+					}
+				}
+				if body.closes.Load() != 1 {
+					t.Fatalf("body closed %d times", body.closes.Load())
+				}
+			})
+		})
+	}
+}
+
 func TestPublicRetryConnectionAndAttemptTimeoutFlags(t *testing.T) {
 	for _, failure := range []string{"connection", "timeout"} {
 		for _, enabled := range []bool{false, true} {

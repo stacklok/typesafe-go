@@ -97,8 +97,9 @@ func isLoopbackHost(host string) bool {
 }
 
 // WithHTTPClient copies a client for transport customization in API-key mode.
-// It does not authenticate: use it with WithAPIKey. It cannot be combined with
-// WithAuthenticatedHTTPClient.
+// The transport remains shared; the caller owns idle-connection cleanup. The SDK
+// does not add a Close method. It does not authenticate: use it with WithAPIKey.
+// It cannot be combined with WithAuthenticatedHTTPClient.
 func WithHTTPClient(client *http.Client) Option {
 	return func(c *config) error {
 		if client == nil {
@@ -116,8 +117,9 @@ func WithHTTPClient(client *http.Client) Option {
 	}
 }
 
-// WithAuthenticatedHTTPClient copies a client whose transport owns
-// authentication. The SDK leaves the Authorization header untouched. Use it
+// WithAuthenticatedHTTPClient copies a client whose shared transport owns
+// authentication. The caller owns idle-connection cleanup; the SDK does not add
+// a Close method. The SDK leaves the Authorization header untouched. Use it
 // alone; it cannot be combined with WithAPIKey or WithHTTPClient.
 func WithAuthenticatedHTTPClient(client *http.Client) Option {
 	return func(c *config) error {
@@ -150,7 +152,8 @@ func WithDefaultModel(model string) Option {
 	}
 }
 
-// WithAttemptTimeout bounds each HTTP attempt, including reading its body.
+// WithAttemptTimeout bounds each HTTP attempt, including reading its body. It
+// does not bound request preparation or response decoding outside the attempt.
 func WithAttemptTimeout(timeout time.Duration) Option {
 	return func(c *config) error {
 		if timeout <= 0 {

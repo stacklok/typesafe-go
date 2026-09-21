@@ -1,0 +1,11 @@
+# Go outputs
+*.test
+*.out
+coverage.*
+*.prof
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+*~

@@ -1,0 +1,9 @@
+{
+  "state": {"synthetic": true, "items": [1, null]},
+  "model": "demo-1.0.0",
+  "questions": {
+    "noul": {"type": "noul", "instructions": "Decide", "criteria": {"true": {"nested": true}, "false": null}},
+    "choice": {"type": "choice", "instructions": ["Choose", 2], "criteria": {"a": "A", "b": {"nested": true}}},
+    "score": {"type": "score", "instructions": {"kind": "rank"}, "criteria": ["low", {"nested": [true, null]}]}
+  }
+}

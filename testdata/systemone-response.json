@@ -1,0 +1,9 @@
+{
+  "model": "demo-1.0.0",
+  "answers": {
+    "noul": {"type": "noul", "noul": 0},
+    "choice": {"type": "choice", "choice": "a", "probabilities": {"a": 0.7, "b": 0.3}, "confidence": 0.5},
+    "score": {"type": "score", "score": 0.75, "probabilities": {"0": 0.25, "1": 0.75}, "legend": {"0": "low", "1": {"nested": 9007199254740993}}, "confidence": 0.6}
+  },
+  "usage": {"input_tokens": 10, "output_tokens": 1}
+}

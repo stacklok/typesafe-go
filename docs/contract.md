@@ -1,0 +1,42 @@
+# API and model contract
+
+Observed 2026-09-21 from the public [OpenAPI document](https://api.typesafe.ai/openapi.json), API v0.2.0; behavior was not verified with a paid live call during implementation. The [model documentation](https://docs.typesafe.ai/) remains authoritative for volatile availability, privacy, pricing, throughput, token windows, and model guidance.
+
+## Endpoints and data
+
+`Client.SystemOne` posts `state`, a resolved `model`, and typed `questions` to `/v1/systemone`. `Client.ListModels` gets `/v1/models`. Both use bearer authentication and return `x-typesafe-request-id` as explicit response/error metadata. Request IDs and all service data are untrusted; default error text omits request IDs and arbitrary service strings.
+
+State must be a non-null JSON string, object, or array. Instructions may be omitted/null or a string, object, or array. Noul criteria are optional and may contain null values. Choice criteria are an object whose values may also be null. Score criteria are ordered, non-null strings, objects, or arrays.
+
+Responses preserve finite service probabilities, confidence, fractional Score values, string keys, and structured legends. The client does not normalize probability sums, recompute confidence, round scores, compare legends to requests, or replace server values. It does require the complete requested probability-key set, and rejects unknown/mismatched requested answer variants, a Choice outside the requested options, out-of-set probability keys, and Score probability keys outside requested levels. Additive object fields remain compatible. Duplicate JSON object keys are rejected as ambiguous protocol data.
+
+## Schema and documentation discrepancies
+
+| Topic | Live schema / Python 0.7.0 | Other documentation/client | SDK behavior |
+|---|---|---|---|
+| Instructions | Optional and nullable | API docs say required | Omit optional nil values; accept schema-supported null where represented; do not require instructions. |
+| Score count | Minimum 1, no schema maximum | Service/model docs limit 10; 2+ is recommended for meaningful scoring | Enforce the schema minimum only. Above 10 may be rejected remotely; use 2–10 for model quality. |
+| Choice count | No schema maximum | Service/model docs limit 255 | No local maximum. Above 255 may be rejected remotely. |
+| Score level null | Excluded | Older advanced/JS docs accepted null | Reject before I/O. |
+| State null | Excluded | Older JS accepted null | Reject before I/O. |
+| Score legend values | String, object, or array | API prose emphasizes strings | Decode and preserve structured values. |
+| Probability bounds | Schema descriptions specify 0–1, but omit machine-readable minimum/maximum keywords | Public API semantics define probabilities on 0–1 | Enforce finite values in the inclusive 0–1 range; this semantic validation is intentional. |
+| Unknown answer variants | Three wire variants | Some clients drop/cast them | Return `ProtocolError`; never silently omit requested answers. |
+
+Schema leniency is not a claim that the service/model supports over-limit calls. It avoids hard-coding a changing remote limit while allowing wire-contract conformance tests.
+
+## Models and decision semantics
+
+Jev is a fast RLCD parallel decision model, not chat, content generation, tool execution, or a source of reasoning traces. Current model documentation identifies `jev-1.13.0` plus stable/preview aliases. Pin a version when policy thresholds matter; aliases can move. The models endpoint is not an exhaustive allowlist of pinned versions.
+
+Confidence is a model statistic, not a probability that an answer is correct. Do not use the approximate demo confidence formula as an authorization control. Adversarial state can steer answers. Known weaknesses include numeric/date/counting tasks, multi-hop reasoning, and context rot. Noul, Choice, and separately worded negations are not mathematically interchangeable. Applications own thresholds, authorization, review, and actions.
+
+One request can batch independent questions over one shared state. Do not batch unrelated documents merely to reduce calls. Current pricing, throughput, RPM, and token-window values are deliberately not SDK constants because they can change; consult the current model documentation.
+
+## Retries, errors, and privacy
+
+Defaults are two retries (three total attempts), 500 ms initial/5 s maximum subtractive-jitter backoff, 10 s per-attempt timeout, and a 30 s total budget. HTTP 408, 429, 5xx, configured connection errors, interrupted reads, and per-attempt timeouts are eligible. Server retry delays take precedence and are never shortened to fit a budget.
+
+A failed connection can occur after a POST was processed. The service documents no idempotency key, so retries can duplicate usage or billing. `MaxRetries: 0` disables SDK retries only; it cannot guarantee at-most-once processing or constrain a caller's custom transport.
+
+TypeSafe states that input is not used for training, is US-hosted, and is retained as reasonably necessary; Zero Data Retention is enterprise-only. Applications must re-check current terms and classify data themselves. The SDK does not log, persist, cache, or emit telemetry, but the Go runtime, operating system, proxies, and a caller-supplied transport can observe or log destinations, timing, headers, and payloads. The SDK cannot prevent a custom transport from doing so.

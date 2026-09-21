@@ -67,6 +67,70 @@ func TestAcceptanceRepositoryArtifacts(t *testing.T) {
 	}
 }
 
+// AC-CI-02: lightweight artifact checks complement the executable release-script tests.
+// These checks intentionally do not claim to provide complete YAML security validation.
+func TestAcceptanceReleaseWorkflowArtifact(t *testing.T) {
+	data, err := os.ReadFile(".github/workflows/release.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow := string(data)
+	verify := releaseWorkflowJob(t, workflow, "verify")
+	publish := releaseWorkflowJob(t, workflow, "publish")
+
+	for _, want := range []string{
+		"name: Release\n\non:\n  push:\n    tags:\n      - 'v*'\n\npermissions:\n  contents: read",
+		"if: github.event.created == true && github.event.deleted == false",
+		"TYPESAFE_LIVE_TEST: '0'",
+		"actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955",
+		"actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00",
+		"ref: ${{ github.sha }}", "fetch-depth: 0",
+		"persist-credentials: false", "repo-checkout: false", "cache: false",
+		"gofmt -l .", "go mod tidy", "git diff --exit-code", "git ls-files --others --exclude-standard",
+		"go test ./...", "go test -race ./...", "go vet ./...", "go list -deps ./...",
+		"FuzzDecodeSystemOneResponse", "FuzzValidateRequestJSON",
+		"govulncheck-action@b625fbe08f3bccbe446d94fbf87fcc875a4f50ee",
+	} {
+		if !strings.Contains(workflow, want) {
+			t.Errorf("release workflow missing %q", want)
+		}
+	}
+	if strings.Contains(workflow, "workflow_dispatch:") || strings.Contains(workflow, "pull_request:") || strings.Contains(workflow, "pull_request_target:") || strings.Contains(workflow, "    branches:") {
+		t.Error("release workflow has a non-tag trigger")
+	}
+	for _, line := range strings.Split(workflow, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "- uses: ") {
+			continue
+		}
+		ref, ok := strings.CutPrefix(line, "- uses: ")
+		if comment := strings.IndexByte(ref, ' '); comment >= 0 {
+			ref = ref[:comment]
+		}
+		_, pin, ok := strings.Cut(ref, "@")
+		if !ok || len(pin) != 40 || strings.Trim(pin, "0123456789abcdef") != "" {
+			t.Errorf("release action is not pinned to a full commit: %q", line)
+		}
+	}
+	if strings.Contains(verify, "permissions:") {
+		t.Error("verify must inherit the workflow's default read-only permissions")
+	}
+	if strings.Count(workflow, "cache: false") != 2 {
+		t.Error("every release Go tool setup must disable caching")
+	}
+	if !strings.Contains(publish, "needs: verify") {
+		t.Error("publish must depend only on verify")
+	}
+	if strings.Count(workflow, "contents: write") != 1 || !strings.Contains(publish, "contents: write") {
+		t.Error("release workflow must have exactly one job-scoped write permission")
+	}
+	for _, forbidden := range []string{"actions/checkout", "actions/setup-go", "govulncheck", "go test", "go run"} {
+		if strings.Contains(publish, forbidden) {
+			t.Errorf("publish job executes or checks out repository code: %q", forbidden)
+		}
+	}
+}
+
 // Focused executable evidence (in addition to repository-artifact checks above):
 //   - AC-API-02/03/06/07/08: TestPublicClientContractFixturesAndHeaders,
 //     TestPublicSystemOneBaselineZerosAndAdditiveFields,

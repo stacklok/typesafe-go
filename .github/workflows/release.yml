@@ -1,0 +1,134 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.event.created == true && github.event.deleted == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      EVENT_REF: ${{ github.ref }}
+      EVENT_SHA: ${{ github.sha }}
+      RELEASE_TAG: ${{ github.ref_name }}
+      TYPESAFE_LIVE_TEST: '0'
+    outputs:
+      release_tag: ${{ steps.identity.outputs.release_tag }}
+      release_sha: ${{ steps.identity.outputs.release_sha }}
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify release identity
+        id: identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$EVENT_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Invalid event commit SHA" >&2
+            exit 1
+          fi
+          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Release tag must be stable SemVer (vMAJOR.MINOR.PATCH)" >&2
+            exit 1
+          fi
+          case "${BASH_REMATCH[1]}" in
+            0|1) ;;
+            *)
+              echo "Module github.com/stacklok/typesafe-go supports only v0 and v1 tags; v2+ requires a /vN module path" >&2
+              exit 1
+              ;;
+          esac
+          if [[ "$EVENT_REF" != "refs/tags/$RELEASE_TAG" ]]; then
+            echo "Event ref does not match the validated release tag" >&2
+            exit 1
+          fi
+          if [[ "$(awk '$1 == "module" { print $2; exit }' go.mod)" != "github.com/stacklok/typesafe-go" ]]; then
+            echo "Unexpected Go module path" >&2
+            exit 1
+          fi
+
+          tag_ref="refs/tags/$RELEASE_TAG"
+          tag_commit="$(git rev-parse --verify "$tag_ref^{commit}")"
+          head_commit="$(git rev-parse HEAD)"
+          if [[ "$tag_commit" != "$EVENT_SHA" || "$head_commit" != "$EVENT_SHA" ]]; then
+            echo "Tag, event, and checked-out commits do not match" >&2
+            exit 1
+          fi
+          git merge-base --is-ancestor "$head_commit" refs/remotes/origin/main
+
+          printf 'release_tag=%s\n' "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          printf 'release_sha=%s\n' "$head_commit" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
+        with:
+          go-version: '1.26.6'
+          cache: false
+      - name: Check formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          unformatted="$(gofmt -l .)"
+          if [[ -n "$unformatted" ]]; then
+            printf 'Files need gofmt:\n%s\n' "$unformatted" >&2
+            exit 1
+          fi
+      - name: Check module files
+        run: |
+          go mod tidy
+          git diff --exit-code
+          test -z "$(git ls-files --others --exclude-standard)"
+      - run: go test ./...
+      - run: go test -race ./...
+      - run: go vet ./...
+      - name: Fuzz response decoding (smoke)
+        run: go test -run '^$' -fuzz '^FuzzDecodeSystemOneResponse$' -fuzztime=10s .
+      - name: Fuzz request validation (smoke)
+        run: go test -run '^$' -fuzz '^FuzzValidateRequestJSON$' -fuzztime=10s .
+      - name: Load all package dependencies
+        run: go list -deps ./... > /dev/null
+      - uses: golang/govulncheck-action@b625fbe08f3bccbe446d94fbf87fcc875a4f50ee # v1.0.4
+        with:
+          go-version-input: '1.26.6'
+          go-package: ./...
+          repo-checkout: false
+          cache: false
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.verify.outputs.release_tag }}
+      VERIFIED_SHA: ${{ needs.verify.outputs.release_sha }}
+    steps:
+      - name: Publish GitHub release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$VERIFIED_SHA" =~ ^[0-9a-f]{40}$ ]] ||
+             [[ ! "$RELEASE_TAG" =~ ^v(0|1)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Invalid verified release identity" >&2
+            exit 1
+          fi
+          current_sha="$(gh api "repos/$GH_REPO/commits/refs/tags/$RELEASE_TAG" --jq .sha)"
+          if [[ "$current_sha" != "$VERIFIED_SHA" ]]; then
+            echo "Release tag was moved" >&2
+            exit 1
+          fi
+          gh release create --repo "$GH_REPO" "$RELEASE_TAG" --verify-tag --generate-notes

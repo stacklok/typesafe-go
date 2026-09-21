@@ -64,8 +64,8 @@ func main() {
 
 Applications explicitly obtain and supply credentials; the SDK does not read environment variables. The only valid constructor combinations are:
 
-- `WithAPIKey(key)`, optionally with one `WithHTTPClient(client)`. The SDK adds `Authorization: Bearer <key>` on every attempt; `WithHTTPClient` only customizes that transport and does not authenticate on its own.
-- `WithAuthenticatedHTTPClient(client)` alone. Its caller-owned transport handles authentication; the SDK neither verifies authentication nor reads, sets, deletes, decodes, or logs the `Authorization` header. The transport is invoked for every retry and owns credential refresh and lifecycle.
+- `WithAPIKey(key)`, optionally with one `WithHTTPClient(client)`. The SDK adds `Authorization: Bearer <key>` on every attempt; `WithHTTPClient` only customizes that transport and does not authenticate on its own. The client value is copied, but its transport remains shared; the caller owns idle-connection cleanup and the SDK adds no `Close` method.
+- `WithAuthenticatedHTTPClient(client)` alone. Its caller-owned, shared transport handles authentication; the SDK neither verifies authentication nor reads, sets, deletes, decodes, or logs the `Authorization` header. The transport is invoked for every retry and the caller owns credential refresh, lifecycle, and idle-connection cleanup.
 
 `WithAPIKey`, `WithHTTPClient`, and `WithAuthenticatedHTTPClient` reject duplicate selections. An authenticated client cannot be combined with either API-key authentication or an ordinary client, in either option order. Constructor errors name the conflicting option and how to choose a valid combination.
 
@@ -116,6 +116,8 @@ client, err := typesafe.NewClient(typesafe.WithAPIKey(apiKey), typesafe.WithRetr
 ```
 
 A zero `RetryPolicy` is invalid; `WithRetryPolicy` uses the complete supplied value rather than merging zero fields with defaults. Disabling SDK retries does not guarantee at-most-once server processing or constrain custom transport behavior.
+
+The per-attempt timeout and total retry budget cover HTTP attempts, response-body reads, and retry backoff. They do not bound arbitrary caller `MarshalJSON` work or other request preparation before HTTP begins, nor synchronous response decoding after the HTTP call completes.
 
 Caller cancellation and deadlines remain detectable with `errors.Is`. API errors expose safe status, retry delay, and sanitized request-ID metadata through `errors.As`; malformed successful responses return `ProtocolError`. A System One `ProtocolError` exposes `Usage` only when the 2xx body is complete JSON and contains both nonnegative integer token counts; the response itself is always nil on error, so no partial answers are returned. Missing, null, partial, negative, noninteger, or overflowing usage produces nil error metadata. Response bodies and API keys are never included in SDK error text. A custom `http.RoundTripper` remains responsible for honoring request contexts; the SDK closes a returned response body when the context ends so ordinary close-aware bodies unblock.
 

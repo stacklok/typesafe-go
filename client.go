@@ -276,11 +276,21 @@ func (c *Client) attempt(ctx context.Context, method, path string, payload []byt
 		closeBody()
 	}()
 	requestID := sanitizeRequestID(resp.Header.Get("x-typesafe-request-id"), c.apiKey)
+	var apiErr *APIError
+	retryableStatus := false
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		delay, _ := retryAfter(resp.Header, time.Now())
+		apiErr = &APIError{StatusCode: resp.StatusCode, RequestID: requestID, RetryAfter: delay}
+		retryableStatus = resp.StatusCode == 408 || resp.StatusCode == 429 || resp.StatusCode >= 500
+	}
 	reader := io.Reader(resp.Body)
 	var gz *gzip.Reader
 	if strings.EqualFold(resp.Header.Get("Content-Encoding"), "gzip") {
 		gz, err = gzip.NewReader(resp.Body)
 		if err != nil {
+			if apiErr != nil {
+				return nil, requestID, resp.Header, apiErr, retryableStatus
+			}
 			return nil, requestID, resp.Header, &ConnectionError{cause: err}, c.retry.RetryConnectionErrors
 		}
 		defer gz.Close()
@@ -292,16 +302,16 @@ func (c *Client) attempt(ctx context.Context, method, path string, payload []byt
 		if errors.As(err, &large) {
 			return nil, requestID, resp.Header, err, false
 		}
+		if apiErr != nil {
+			return nil, requestID, resp.Header, apiErr, retryableStatus
+		}
 		if ctx.Err() != nil {
 			return nil, requestID, resp.Header, ctx.Err(), true
 		}
 		return nil, requestID, resp.Header, &ConnectionError{cause: err}, c.retry.RetryConnectionErrors
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		delay, _ := retryAfter(resp.Header, time.Now())
-		apiErr := &APIError{StatusCode: resp.StatusCode, RequestID: requestID, RetryAfter: delay}
-		retryable := resp.StatusCode == 408 || resp.StatusCode == 429 || resp.StatusCode >= 500
-		return nil, requestID, resp.Header, apiErr, retryable
+	if apiErr != nil {
+		return nil, requestID, resp.Header, apiErr, retryableStatus
 	}
 	return data, requestID, resp.Header, nil, false
 }

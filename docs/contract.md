@@ -10,8 +10,8 @@ Observed 2026-09-21 from the public [OpenAPI document](https://api.typesafe.ai/o
 
 Construction requires exactly one explicit strategy:
 
-- `WithAPIKey(key)`, optionally with one `WithHTTPClient(client)`, makes the SDK set bearer authentication. `WithHTTPClient` only customizes that API-key transport and does not authenticate by itself.
-- `WithAuthenticatedHTTPClient(client)` alone declares that the supplied transport owns authentication. The SDK leaves `Authorization` untouched and invokes that transport on every attempt.
+- `WithAPIKey(key)`, optionally with one `WithHTTPClient(client)`, makes the SDK set bearer authentication. `WithHTTPClient` only customizes that API-key transport and does not authenticate by itself. The client value is copied, but its transport remains shared; the caller owns idle-connection cleanup and the SDK adds no `Close` method.
+- `WithAuthenticatedHTTPClient(client)` alone declares that the supplied, shared transport owns authentication. The SDK leaves `Authorization` untouched and invokes that transport on every attempt; the caller owns its lifecycle and idle-connection cleanup.
 
 Duplicate selectors, and combinations of `WithAuthenticatedHTTPClient` with `WithAPIKey` or `WithHTTPClient`, fail regardless of option order. Errors name the relevant options and direct callers to a valid selection. The SDK does not verify authenticated transports, decode tokens, or depend on an OAuth package.
 
@@ -46,7 +46,9 @@ One request can batch independent questions over one shared state. Do not batch 
 
 ## Retries, errors, and privacy
 
-Defaults are two retries (three total attempts), 500 ms initial/5 s maximum subtractive-jitter backoff, 10 s per-attempt timeout, and a 30 s total budget. HTTP 408, 429, 5xx, configured connection errors, interrupted reads, and per-attempt timeouts are eligible. Server retry delays take precedence and are never shortened to fit a budget.
+Defaults are two retries (three total attempts), 500 ms initial/5 s maximum subtractive-jitter backoff, 10 s per-attempt timeout, and a 30 s total budget. HTTP 408, 429, and 5xx statuses are retryable even when their error body is malformed or unreadable; configured connection errors, interrupted 2xx reads, and per-attempt timeouts are also eligible. Other 4xx statuses are not retried. A known non-2xx status returns safe `APIError` metadata despite an ordinary gzip/read failure, while an oversized body remains non-retryable and takes precedence. Server retry delays take precedence and are never shortened to fit a budget.
+
+Attempt and total timeouts cover HTTP attempts, response-body reads, and retry backoff. They do not bound arbitrary caller `MarshalJSON` work or other request preparation before HTTP starts, or synchronous response decoding after the HTTP call completes.
 
 A failed connection can occur after a POST was processed. The service documents no idempotency key, so retries can duplicate usage or billing. `MaxRetries: 0` disables SDK retries only; it cannot guarantee at-most-once processing or constrain a caller's custom transport.
 

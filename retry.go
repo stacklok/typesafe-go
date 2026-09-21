@@ -9,9 +9,11 @@ import (
 	"time"
 )
 
-// RetryPolicy controls retries and their total call budget. MaxRetries counts
-// retries after the first attempt. A zero-value policy is invalid; start with
-// DefaultRetryPolicy and modify fields, including setting MaxRetries to zero.
+// RetryPolicy controls retries and their total HTTP call budget, including
+// attempts, body reads, and backoff. It does not bound request preparation or
+// response decoding. MaxRetries counts retries after the first attempt. A
+// zero-value policy is invalid; start with DefaultRetryPolicy and modify fields,
+// including setting MaxRetries to zero.
 type RetryPolicy struct {
 	MaxRetries            int
 	BackoffInitial        time.Duration

@@ -117,7 +117,9 @@ client, err := typesafe.NewClient(typesafe.WithAPIKey(apiKey), typesafe.WithRetr
 
 A zero `RetryPolicy` is invalid; `WithRetryPolicy` uses the complete supplied value rather than merging zero fields with defaults. Disabling SDK retries does not guarantee at-most-once server processing or constrain custom transport behavior.
 
-Caller cancellation and deadlines remain detectable with `errors.Is`. API errors expose safe status, retry delay, and sanitized request-ID metadata through `errors.As`; malformed successful responses return `ProtocolError`. Response bodies and API keys are never included in SDK error text. A custom `http.RoundTripper` remains responsible for honoring request contexts; the SDK closes a returned response body when the context ends so ordinary close-aware bodies unblock.
+Caller cancellation and deadlines remain detectable with `errors.Is`. API errors expose safe status, retry delay, and sanitized request-ID metadata through `errors.As`; malformed successful responses return `ProtocolError`. A System One `ProtocolError` exposes `Usage` only when the 2xx body is complete JSON and contains both nonnegative integer token counts; the response itself is always nil on error, so no partial answers are returned. Missing, null, partial, negative, noninteger, or overflowing usage produces nil error metadata. Response bodies and API keys are never included in SDK error text. A custom `http.RoundTripper` remains responsible for honoring request contexts; the SDK closes a returned response body when the context ends so ordinary close-aware bodies unblock.
+
+`ProtocolError.Usage` is an additive exported field. During this pre-v1 period, external unkeyed `ProtocolError` struct literals may therefore require migration to keyed literals.
 
 ## API and model semantics
 

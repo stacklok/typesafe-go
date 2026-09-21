@@ -46,11 +46,13 @@ func (e *APIError) Error() string {
 func (e *APIError) Is(target error) bool { return target == ErrAPI }
 
 // ProtocolError reports a malformed service response. Reason is a fixed SDK
-// classification; decoder errors and response bodies are not retained.
+// classification; decoder errors and response bodies are not retained. Usage is
+// set only for System One responses with a complete, valid token-count pair.
 type ProtocolError struct {
 	RequestID string
 	Field     string
 	Reason    string
+	Usage     *Usage
 }
 
 func (e *ProtocolError) Error() string {

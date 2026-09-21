@@ -25,13 +25,13 @@ func FuzzDecodeSystemOneResponse(f *testing.F) {
 			}
 			var protocolErr *ProtocolError
 			safeFields := map[string]bool{"response": true, "model": true, "answers": true, "usage": true}
-			safeReasons := map[string]bool{"malformed JSON": true, "missing": true, "malformed answer": true, "invalid noul": true, "wrong answer type": true, "invalid choice": true, "out-of-set choice": true, "invalid probability keys": true, "invalid score": true, "invalid score range or keys": true, "unknown answer type": true, "missing requested answer": true}
-			if !errors.As(err, &protocolErr) || !safeFields[protocolErr.Field] || !safeReasons[protocolErr.Reason] || strings.Contains(fmt.Sprintf("%v %+v %#v", err, err, err), "private-response-marker") {
+			safeReasons := map[string]bool{"malformed JSON": true, "missing": true, "invalid": true, "malformed answer": true, "invalid noul": true, "wrong answer type": true, "invalid choice": true, "out-of-set choice": true, "invalid probability keys": true, "invalid score": true, "invalid score range or keys": true, "unknown answer type": true, "missing requested answer": true}
+			if !errors.As(err, &protocolErr) || !safeFields[protocolErr.Field] || !safeReasons[protocolErr.Reason] || protocolErr.Usage != nil && (protocolErr.Usage.InputTokens < 0 || protocolErr.Usage.OutputTokens < 0) || strings.Contains(fmt.Sprintf("%v %+v %#v", err, err, err), "private-response-marker") {
 				t.Fatalf("unsafe protocol error: %#v", err)
 			}
 			return
 		}
-		if response.Model == "" || response.Answers == nil || len(response.Answers) < len(expected) {
+		if response.Model == "" || response.Answers == nil || len(response.Answers) < len(expected) || response.Usage.InputTokens < 0 || response.Usage.OutputTokens < 0 {
 			t.Fatal("successful decode violated root invariants")
 		}
 		for id, want := range expected {

@@ -1,6 +1,6 @@
 # TypeSafe Go client implementation plan
 
-Status: implemented and offline-verified on 2026-09-21. The repository includes code, tests, examples, documentation, governance, and CI. Optional live conformance remains deliberately unverified because no paid request was authorized.
+Status: implemented and offline-verified on 2026-09-21. The repository includes code, tests, examples, documentation, governance, and CI. An authorized live mixed-question smoke check passed; see [test evidence](test-evidence.md). Full live endpoint and boundary conformance remains unverified.
 
 ## 1. Scope and architectural decision
 

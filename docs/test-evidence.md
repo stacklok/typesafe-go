@@ -1,6 +1,6 @@
 # Implementation evidence
 
-Status: implemented and offline-verified on 2026-09-21. The repository includes code, tests, examples, documentation, governance, and CI. Live service behavior remains unverified because no paid conformance run was authorized.
+Status: implemented and offline-verified on 2026-09-21. The repository includes code, tests, examples, documentation, governance, and CI. An authorized, single-request live smoke check passed on the same date; its limited scope is recorded below.
 
 Validation completed locally after the focused authentication follow-up:
 
@@ -32,8 +32,28 @@ Earlier focused regression evidence remains mapped to executable test names rath
 
 Probability values intentionally remain finite and within 0–1. The public schema descriptions and probability semantics require that range even though machine-readable minimum/maximum keywords are absent; negative and above-one rejection cases remain in `TestPublicSystemOneAdversarialResponseMatrix`.
 
-This records only assertions present in the offline tests; it does not claim live API conformance or release status.
+The offline assertions above do not imply live API conformance or release status.
 
 The optional live test is build-tagged, environment-gated, pinned-model-only, context-bounded, and has SDK retries disabled.
+
+## Authorized live smoke check
+
+On 2026-09-21, `examples/live-basic` successfully made one `POST /v1/systemone` to the official API, with retries disabled and a 15-second caller deadline. The Go process loaded the API key from an explicitly supplied file; no credential was printed, included in command arguments, or saved in this repository.
+
+The synthetic state described a duplicate charge and requested a refund. The request combined Noul, Choice, and Score questions. Actual results:
+
+| Field | Observed value |
+| --- | --- |
+| Resolved model | `jev-1.13.0` |
+| Input / output tokens | 445 / 70 |
+| Duplicate-charge Noul | 0.98 |
+| Team Choice | `billing` |
+| Team probabilities | billing 1, other 0, technical 0 |
+| Team confidence | 1 |
+| Urgency Score | 0.95 on a zero-based 0–2 rubric |
+| Urgency probabilities | level 0: 0.05, level 1: 0.95, level 2: 0 |
+| Urgency confidence | 0.92 |
+
+This verifies direct API-key authentication and decoding all three answer variants in one successful live request. It does not establish model accuracy or calibration, model-list behavior, failure-boundary conformance, or live OAuth/gateway compatibility. The example's ordinary tests remain offline. After adding the sample, `go test ./...`, `go test -race ./...`, and `go vet ./...` passed with Go 1.26.6.
 
 No community SDK source was copied. The implementation is fresh, uses only the Go standard library at runtime, and therefore needs no third-party code notice.

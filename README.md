@@ -92,7 +92,11 @@ client, err := typesafe.NewClient(
 
 The explicit gateway URL is required: without `WithBaseURL`, the SDK targets the direct TypeSafe endpoint, which is for API-key authentication. The application owns grant flow, initial token acquisition, refresh behavior, lifecycle context, and token-endpoint TLS and HTTP timeouts. In particular, the inference request context passed to `SystemOne` or `ListModels` may not bound `oauth2.TokenSource.Token`: `oauth2.NewClient` can use the context captured when that client or token source was created. Bound token acquisition and refresh separately with the application-owned lifecycle context and HTTP client. The SDK cannot redact unknown transport-owned tokens from custom transport logs or errors. See the [gateway transport contract](docs/contract.md#authentication-and-gateway-transports).
 
-See six small, synthetic, offline [`examples`](examples) for support triage, skill recommendation, RAG ranking, composite scoring, candidate extraction, and advisory security routing.
+See six small, synthetic, offline [`examples`](examples) for support triage, skill recommendation, RAG ranking, composite scoring, candidate extraction, and advisory security routing. The [`live-basic`](examples/live-basic) sample makes one billable inference request to the official API; it reads its key only at runtime from a file:
+
+```sh
+go run ./examples/live-basic -api-key-file /path/to/typesafe-key.tok
+```
 
 ## Defaults and failure behavior
 

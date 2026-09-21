@@ -275,6 +275,9 @@ func TestACAPI06And07ProtocolFailures(t *testing.T) {
 	}
 }
 
+// TestACAPI08ValuesPreserved deliberately uses a schema-decodable but not
+// live-conformant Score relationship to prove the decoder preserves service values
+// rather than normalizing probabilities or recomputing Score/legend content.
 func TestACAPI08ValuesPreserved(t *testing.T) {
 	q := map[string]Question{"q": Score(nil, "a", "b")}
 	body := `{"model":"unlisted-version","answers":{"q":{"type":"score","score":0.333333333333,"probabilities":{"0":0.2,"1":0.7},"legend":{"0":{"a":9007199254740993},"1":[true,null]},"confidence":0.123}},"usage":{"input_tokens":1,"output_tokens":2}}`

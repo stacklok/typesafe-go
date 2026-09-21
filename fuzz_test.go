@@ -25,7 +25,7 @@ func FuzzDecodeSystemOneResponse(f *testing.F) {
 			}
 			var protocolErr *ProtocolError
 			safeFields := map[string]bool{"response": true, "model": true, "answers": true, "usage": true}
-			safeReasons := map[string]bool{"malformed JSON": true, "missing": true, "invalid": true, "malformed answer": true, "invalid noul": true, "wrong answer type": true, "invalid choice": true, "out-of-set choice": true, "invalid probability keys": true, "invalid score": true, "invalid score range or keys": true, "unknown answer type": true, "missing requested answer": true}
+			safeReasons := map[string]bool{"malformed JSON": true, "missing": true, "invalid": true, "malformed answer": true, "invalid noul": true, "wrong answer type": true, "invalid choice": true, "choice is not maximum probability": true, "out-of-set choice": true, "invalid probability keys": true, "invalid score": true, "invalid score range or keys": true, "unknown answer type": true, "missing requested answer": true}
 			if !errors.As(err, &protocolErr) || !safeFields[protocolErr.Field] || !safeReasons[protocolErr.Reason] || protocolErr.Usage != nil && (protocolErr.Usage.InputTokens < 0 || protocolErr.Usage.OutputTokens < 0) || strings.Contains(fmt.Sprintf("%v %+v %#v", err, err, err), "private-response-marker") {
 				t.Fatalf("unsafe protocol error: %#v", err)
 			}
@@ -47,11 +47,12 @@ func FuzzDecodeSystemOneResponse(f *testing.F) {
 					t.Fatalf("%s invalid noul", id)
 				}
 			case ChoiceAnswer:
-				if value.Choice == "" || !finiteRange(value.Confidence, 0, 1) || value.Probabilities == nil {
+				selected, selectedPresent := value.Probabilities[value.Choice]
+				if !finiteRange(value.Confidence, 0, 1) || value.Probabilities == nil || !selectedPresent {
 					t.Fatalf("%s invalid choice", id)
 				}
 				for _, probability := range value.Probabilities {
-					if !finiteRange(probability, 0, 1) {
+					if !finiteRange(probability, 0, 1) || probability > selected {
 						t.Fatalf("%s invalid probability", id)
 					}
 				}

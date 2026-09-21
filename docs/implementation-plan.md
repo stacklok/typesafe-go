@@ -130,11 +130,15 @@ type Usage struct { InputTokens, OutputTokens int }
 type SystemOneResponse struct {
     Model string; Answers map[string]Answer; Usage Usage; RequestID string
 }
+// ProtocolError additionally carries Usage *Usage when independently valid on
+// an otherwise invalid, complete 2xx System One response.
 type Model struct { Name, Description, ReleaseDate string }
 type ModelsResponse struct { Models []Model; RequestID string }
 ```
 
-Decode through private pointer-bearing wire structs so a required field missing/null is distinguishable from a legitimate zero or empty value. Require response `model`, `answers`, both usage counts, and every schema-required answer field. Validate finite probabilities/confidence/score and schema ranges (`noul` and confidence in [0,1]); do not normalize distributions, require exact sums, recompute confidence, round scores, compare legends to requests, or replace server values. Score is the zero-based fractional expected index. Legend keys and probability keys stay strings exactly as sent.
+Decode through private pointer-bearing wire structs so a required field missing/null is distinguishable from a legitimate zero or empty value. Require response `model`, `answers`, both usage counts, and every schema-required answer field. Usage counts remain `int`, must be nonnegative, and have no additional SDK maximum. Validate finite probabilities/confidence/score and schema ranges (`noul` and confidence in [0,1]); do not normalize distributions, require exact sums, recompute confidence, round scores, compare legends to requests, or replace server values. Score is the zero-based fractional expected index. Legend keys and probability keys stay strings exactly as sent.
+
+Before typed model or answer decoding, validate the complete JSON document and reject duplicate keys globally, then independently extract usage. On an otherwise invalid 2xx System One response, return a nil response and attach usage to `ProtocolError` only when both counts are present, non-null, nonnegative integers representable by `int`; never return partial answers. Malformed/incomplete JSON or invalid usage retains no usage metadata. This additive public error field may break external unkeyed struct literals, which is accepted for the pre-v1 API.
 
 For every requested ID, require an answer of the matching discriminator. Missing, null, malformed, unknown, or mismatched requested answers produce `ProtocolError`. Extra JSON fields are ignored. Extra answer IDs may be decoded if they use a known discriminator; an unknown answer discriminator anywhere is a protocol error rather than silent data loss.
 
@@ -145,7 +149,7 @@ Validate model cards have nonempty name/description and a strict `YYYY-MM-DD` ca
 Implement these inspectable errors and sentinels:
 
 - `APIError { StatusCode int; RequestID string; RetryAfter time.Duration }`, matching `ErrAPI` through `errors.Is` and discoverable with `errors.As`.
-- `ProtocolError { RequestID, Field, Reason string }`, matching `ErrProtocol`; `Reason` is a fixed SDK classification and no decoder error or raw response body is retained.
+- `ProtocolError { RequestID, Field, Reason string; Usage *Usage }`, matching `ErrProtocol`; `Reason` is a fixed SDK classification and no decoder error or raw response body is retained. `Usage` is nil unless both usage counts were independently valid nonnegative integers; a non-nil pointer to `Usage{}` means both counts were present and known to be zero.
 - `ResponseTooLargeError { Limit int64 }`, matching `ErrResponseTooLarge`.
 - connection/attempt-timeout wrappers that unwrap the transport cause and match stable sentinels; caller cancellation/deadline must continue to satisfy `errors.Is(err, context.Canceled/DeadlineExceeded)`.
 - construction/input errors with stable, payload-free messages.

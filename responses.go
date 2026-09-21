@@ -95,75 +95,86 @@ func decodeSystemOne(data []byte, requestID string, expected map[string]expected
 	if err := checkDuplicateKeys(data); err != nil {
 		return nil, protocol(requestID, "response", "malformed JSON")
 	}
-	var raw rawResponse
-	if err := decodeOne(data, &raw); err != nil {
+	var envelope map[string]json.RawMessage
+	if err := decodeOne(data, &envelope); err != nil {
 		return nil, protocol(requestID, "response", "malformed JSON")
 	}
+	usage := decodeUsage(envelope["usage"])
+	invalid := func(field, reason string) error {
+		return &ProtocolError{RequestID: requestID, Field: field, Reason: reason, Usage: usage}
+	}
+	var raw rawResponse
+	if err := decodeOne(data, &raw); err != nil {
+		return nil, invalid("response", "malformed JSON")
+	}
 	if raw.Model == nil || *raw.Model == "" {
-		return nil, protocol(requestID, "model", "missing")
+		return nil, invalid("model", "missing")
 	}
 	if raw.Answers == nil {
-		return nil, protocol(requestID, "answers", "missing")
+		return nil, invalid("answers", "missing")
 	}
 	if raw.Usage == nil || raw.Usage.Input == nil || raw.Usage.Output == nil {
-		return nil, protocol(requestID, "usage", "missing")
+		return nil, invalid("usage", "missing")
+	}
+	if *raw.Usage.Input < 0 || *raw.Usage.Output < 0 {
+		return nil, invalid("usage", "invalid")
 	}
 	answers := make(map[string]Answer, len(*raw.Answers))
 	for id, body := range *raw.Answers {
 		var a rawAnswer
 		if err := decodeOne(body, &a); err != nil || a.Type == nil {
-			return nil, protocol(requestID, "answers", "malformed answer")
+			return nil, invalid("answers", "malformed answer")
 		}
 		want, requested := expected[id]
 		var out Answer
 		switch *a.Type {
 		case "noul":
 			if a.Noul == nil || !finiteRange(*a.Noul, 0, 1) {
-				return nil, protocol(requestID, "answers", "invalid noul")
+				return nil, invalid("answers", "invalid noul")
 			}
 			if requested && want.kind != "noul" {
-				return nil, protocol(requestID, "answers", "wrong answer type")
+				return nil, invalid("answers", "wrong answer type")
 			}
 			out = NoulAnswer{Noul: *a.Noul}
 		case "choice":
 			probabilities, ok := numericMap(a.Probabilities)
 			if a.Choice == nil || !ok || a.Confidence == nil || !finiteRange(*a.Confidence, 0, 1) {
-				return nil, protocol(requestID, "answers", "invalid choice")
+				return nil, invalid("answers", "invalid choice")
 			}
 			if requested {
 				if want.kind != "choice" {
-					return nil, protocol(requestID, "answers", "wrong answer type")
+					return nil, invalid("answers", "wrong answer type")
 				}
 				if _, ok := want.choiceKeys[*a.Choice]; !ok {
-					return nil, protocol(requestID, "answers", "out-of-set choice")
+					return nil, invalid("answers", "out-of-set choice")
 				}
 				if !sameKeys(probabilities, want.choiceKeys) {
-					return nil, protocol(requestID, "answers", "invalid probability keys")
+					return nil, invalid("answers", "invalid probability keys")
 				}
 			}
 			out = ChoiceAnswer{Choice: *a.Choice, Probabilities: probabilities, Confidence: *a.Confidence}
 		case "score":
 			probabilities, ok := numericMap(a.Probabilities)
 			if a.Score == nil || !ok || a.Legend == nil || a.Confidence == nil || !finite(*a.Score) || !finiteRange(*a.Confidence, 0, 1) || !validLegend(*a.Legend) || !sameMapKeys(probabilities, *a.Legend) || !scoreKeys(probabilities, len(probabilities)) {
-				return nil, protocol(requestID, "answers", "invalid score")
+				return nil, invalid("answers", "invalid score")
 			}
 			if requested {
 				if want.kind != "score" {
-					return nil, protocol(requestID, "answers", "wrong answer type")
+					return nil, invalid("answers", "wrong answer type")
 				}
 				if *a.Score < 0 || *a.Score > float64(want.scoreCount-1) || !scoreKeys(probabilities, want.scoreCount) {
-					return nil, protocol(requestID, "answers", "invalid score range or keys")
+					return nil, invalid("answers", "invalid score range or keys")
 				}
 			}
 			out = ScoreAnswer{Score: *a.Score, Probabilities: probabilities, Legend: *a.Legend, Confidence: *a.Confidence}
 		default:
-			return nil, protocol(requestID, "answers", "unknown answer type")
+			return nil, invalid("answers", "unknown answer type")
 		}
 		answers[id] = out
 	}
 	for id := range expected {
 		if _, ok := answers[id]; !ok {
-			return nil, protocol(requestID, "answers", "missing requested answer")
+			return nil, invalid("answers", "missing requested answer")
 		}
 	}
 	return &SystemOneResponse{Model: *raw.Model, Answers: answers, Usage: Usage{*raw.Usage.Input, *raw.Usage.Output}, RequestID: requestID}, nil
@@ -194,6 +205,17 @@ func decodeModels(data []byte, requestID string) (*ModelsResponse, error) {
 
 func protocol(id, field, reason string) error {
 	return &ProtocolError{RequestID: id, Field: field, Reason: reason}
+}
+
+func decodeUsage(data []byte) *Usage {
+	var raw struct {
+		Input  *int `json:"input_tokens"`
+		Output *int `json:"output_tokens"`
+	}
+	if len(data) == 0 || decodeOne(data, &raw) != nil || raw.Input == nil || raw.Output == nil || *raw.Input < 0 || *raw.Output < 0 {
+		return nil
+	}
+	return &Usage{InputTokens: *raw.Input, OutputTokens: *raw.Output}
 }
 
 func numericMap(raw *map[string]*float64) (map[string]float64, bool) {

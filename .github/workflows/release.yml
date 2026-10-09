@@ -73,7 +73,7 @@ jobs:
           printf 'release_sha=%s\n' "$head_commit" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
         with:
-          go-version: '1.26.6'
+          go-version: '1.27.2'
           cache: false
       - name: Check formatting
         shell: bash
